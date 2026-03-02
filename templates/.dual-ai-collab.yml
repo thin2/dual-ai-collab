@@ -1,0 +1,343 @@
+# 双 AI 协作配置文件
+
+project:
+  name: "My Project"
+  type: "fullstack"  # frontend/backend/fullstack/mobile/library
+  description: "项目描述"
+  version: "1.0.0"
+
+# 角色定义
+roles:
+  claude:
+    name: "Claude"
+    role: "架构师/审计员"
+    responsibilities:
+      - "需求分析"
+      - "架构设计"
+      - "任务规划"
+      - "代码审计"
+      - "质量验收"
+    output_dir: "planning/progress/"
+
+  codex:
+    name: "Codex"
+    role: "开发工程师"
+    responsibilities:
+      - "代码实现"
+      - "功能开发"
+      - "Bug 修复"
+      - "单元测试"
+      - "文档编写"
+    working_dir: "."
+
+# 任务板配置
+task_board:
+  path: "planning/codex-tasks.md"
+
+  # 优先级定义
+  priorities:
+    - name: "P1"
+      label: "高优先级"
+      description: "紧急且重要"
+      color: "#f44336"
+    - name: "P2"
+      label: "中优先级"
+      description: "重要但不紧急"
+      color: "#ff9800"
+    - name: "P3"
+      label: "低优先级"
+      description: "可延后"
+      color: "#4caf50"
+
+  # 状态定义
+  statuses:
+    - name: "OPEN"
+      label: "待开始"
+      color: "#9e9e9e"
+    - name: "IN_PROGRESS"
+      label: "进行中"
+      color: "#2196f3"
+    - name: "DONE"
+      label: "已完成（待审计）"
+      color: "#ff9800"
+    - name: "VERIFIED"
+      label: "已验收通过"
+      color: "#4caf50"
+    - name: "REJECTED"
+      label: "审计未通过"
+      color: "#f44336"
+    - name: "BLOCKED"
+      label: "阻塞中"
+      color: "#9c27b0"
+
+  # 任务模板
+  task_template: |
+    ## 任务 #{{id}}: {{title}}
+
+    **优先级**: {{priority}}
+    **状态**: {{status}}
+    **分配给**: {{assignee}}
+    **创建时间**: {{created_at}}
+    **预计工时**: {{estimated_hours}}小时
+
+    ### 任务描述
+    {{description}}
+
+    ### 技术要求
+    {{#each requirements}}
+    - {{this}}
+    {{/each}}
+
+    ### 验收标准
+    {{#each criteria}}
+    - [ ] {{this}}
+    {{/each}}
+
+    ### 相关文件
+    {{#each files}}
+    - `{{this}}`
+    {{/each}}
+
+    ---
+
+# 代码审计配置
+audit:
+  enabled: true
+
+  # 审计标准
+  criteria:
+    - name: "代码质量"
+      weight: 30
+      checks:
+        - "代码结构清晰"
+        - "命名规范"
+        - "注释适当"
+        - "无冗余代码"
+
+    - name: "设计规范"
+      weight: 20
+      checks:
+        - "符合项目架构"
+        - "遵循设计模式"
+        - "组件解耦合理"
+
+    - name: "功能完整性"
+      weight: 25
+      checks:
+        - "所有验收标准满足"
+        - "边界情况处理"
+        - "错误处理完善"
+
+    - name: "性能优化"
+      weight: 10
+      checks:
+        - "无明显性能问题"
+        - "资源使用合理"
+        - "响应时间可接受"
+
+    - name: "安全性"
+      weight: 10
+      checks:
+        - "无安全漏洞"
+        - "输入验证"
+        - "权限控制"
+
+    - name: "可维护性"
+      weight: 5
+      checks:
+        - "易于理解"
+        - "易于修改"
+        - "易于测试"
+
+  # 通过标准
+  min_score: 90  # 最低通过分数
+
+  # 审计报告
+  report_dir: "planning/progress/"
+  report_template: "audit-report.md"
+
+  # 自动审计
+  auto_audit: false  # 是否在任务完成后自动审计
+
+  # 审计频率
+  audit_frequency:
+    P1: "immediate"  # 立即审计
+    P2: "batch"      # 批量审计（3-5个任务）
+    P3: "weekly"     # 每周审计
+
+# 通知配置
+notifications:
+  enabled: true
+
+  # 通知事件
+  events:
+    on_task_created: true
+    on_task_started: true
+    on_task_completed: true
+    on_audit_completed: true
+    on_task_verified: true
+    on_task_rejected: true
+    on_task_blocked: true
+
+  # 通知渠道（可选）
+  channels:
+    # Slack
+    slack:
+      enabled: false
+      webhook_url: ""
+      channel: "#dev"
+
+    # Discord
+    discord:
+      enabled: false
+      webhook_url: ""
+
+    # Email
+    email:
+      enabled: false
+      smtp_host: ""
+      smtp_port: 587
+      from: ""
+      to: []
+
+    # 文件日志
+    file:
+      enabled: true
+      path: "planning/progress/notifications.log"
+
+# 进度跟踪
+progress:
+  enabled: true
+
+  # 每日总结
+  daily_summary:
+    enabled: true
+    path: "planning/progress/{{date}}-summary.md"
+    template: "daily-summary.md"
+
+  # 每周报告
+  weekly_report:
+    enabled: true
+    path: "planning/progress/week-{{week}}-report.md"
+    template: "weekly-report.md"
+
+  # 里程碑
+  milestones:
+    - name: "MVP"
+      description: "最小可行产品"
+      target_date: "2026-03-15"
+      tasks: []
+
+    - name: "Beta"
+      description: "测试版本"
+      target_date: "2026-03-30"
+      tasks: []
+
+# 开发规范
+conventions:
+  # 代码规范
+  code_style:
+    javascript: "airbnb"
+    python: "pep8"
+    css: "bem"
+
+  # Git 规范
+  git:
+    commit_message_format: "type(scope): subject"
+    branch_naming: "feature/task-xxx-description"
+
+  # 文档规范
+  documentation:
+    readme: true
+    api_docs: true
+    inline_comments: true
+
+# 测试配置
+testing:
+  enabled: true
+
+  # 测试要求
+  requirements:
+    unit_test_coverage: 80  # 单元测试覆盖率
+    integration_test: true  # 是否需要集成测试
+    e2e_test: false         # 是否需要端到端测试
+
+  # 测试框架
+  frameworks:
+    javascript: "vitest"
+    python: "pytest"
+
+# 自动化配置
+automation:
+  # 自动化工作流
+  workflows:
+    - name: "auto-dev"
+      description: "自动开发流程"
+      enabled: false
+      steps:
+        - "read_task_board"
+        - "execute_task"
+        - "run_tests"
+        - "update_status"
+
+    - name: "auto-audit"
+      description: "自动审计流程"
+      enabled: false
+      steps:
+        - "find_done_tasks"
+        - "audit_code"
+        - "generate_report"
+        - "update_status"
+
+  # CI/CD 集成
+  ci_cd:
+    enabled: false
+    platform: "github-actions"  # github-actions/gitlab-ci/jenkins
+    config_path: ".github/workflows/dual-ai-collab.yml"
+
+# 高级配置
+advanced:
+  # 并行开发
+  parallel_development:
+    enabled: false
+    max_workers: 3
+
+  # 任务依赖管理
+  dependency_management:
+    enabled: true
+    auto_resolve: false
+
+  # 版本控制
+  version_control:
+    enabled: true
+    auto_commit: false
+    commit_message_template: "feat: complete task #{{id}} - {{title}}"
+
+  # 性能监控
+  performance_monitoring:
+    enabled: false
+    metrics:
+      - "task_completion_time"
+      - "audit_score"
+      - "code_quality"
+
+# 插件配置
+plugins:
+  enabled: false
+  directory: ".dual-ai-collab/plugins"
+
+  # 可用插件
+  available:
+    - name: "slack-notifier"
+      enabled: false
+    - name: "jira-integration"
+      enabled: false
+    - name: "github-sync"
+      enabled: false
+
+# 调试配置
+debug:
+  enabled: false
+  log_level: "INFO"  # DEBUG/INFO/WARNING/ERROR
+  log_file: "planning/progress/debug.log"
+  verbose: false
