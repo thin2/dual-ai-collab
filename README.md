@@ -42,27 +42,30 @@ Claude (架构师/审计员)          Codex (开发工程师)
 
 ### 安装
 
-#### 方式一：作为 OMC Skill 安装
+#### 方式一：克隆到你的项目
 
 ```bash
-# 克隆仓库
-git clone https://github.com/yourusername/dual-ai-collab.git
-
-# 复制 skill 到 Claude 配置目录
-cp dual-ai-collab/skill/dual-ai-collab.md ~/.claude/skills/
-
-# 重启 Claude Code
-```
-
-#### 方式二：独立使用
-
-```bash
-# 克隆仓库
-git clone https://github.com/yourusername/dual-ai-collab.git
+# 克隆仓库（请替换为实际的仓库地址）
+git clone https://github.com/your-username/dual-ai-collab.git
 cd dual-ai-collab
 
-# 复制模板到你的项目
-cp -r templates/* /path/to/your/project/
+# 查看所有脚本
+ls scripts/
+# codex-auto-worker.sh  - Codex 自动工作脚本
+# start-codex.sh        - 启动管理脚本
+# claude-interview.sh   - 访谈脚本
+```
+
+#### 方式二：复制到现有项目
+
+```bash
+# 复制脚本到你的项目
+cp -r dual-ai-collab/scripts /path/to/your/project/
+cp -r dual-ai-collab/templates /path/to/your/project/
+
+# 创建必要的目录
+mkdir -p /path/to/your/project/planning/{specs,progress}
+mkdir -p /path/to/your/project/logs
 ```
 
 ### 初始化项目
@@ -71,13 +74,14 @@ cp -r templates/* /path/to/your/project/
 # 在你的项目目录中
 cd /path/to/your/project
 
-# 初始化协作环境
-/dual-ai-collab init
+# 创建目录结构
+mkdir -p planning/{specs,progress} logs scripts
 
-# 或手动创建
-mkdir -p planning/progress
+# 复制任务板模板
 cp templates/codex-tasks.md planning/
-cp templates/.dual-ai-collab.yml .
+
+# 设置脚本权限
+chmod +x scripts/*.sh
 ```
 
 ---
@@ -86,12 +90,44 @@ cp templates/.dual-ai-collab.yml .
 
 ### 完整工作流程
 
-#### 1️⃣ Claude 规划任务
+#### 0️⃣ Claude 深入访谈（新增！⭐）
+
+在创建任务之前，Claude 会通过 **AskUserQuestion** 工具对你进行深入访谈：
 
 ```bash
-# 使用 skill
-/dual-ai-collab plan "开发用户认证系统"
+# 方式 1: 使用脚本
+bash scripts/claude-interview.sh "用户认证系统"
 
+# 方式 2: 直接告诉 Claude
+"我想开发用户认证系统，请对我进行深入访谈"
+```
+
+**访谈内容涵盖**：
+- 🎯 功能范围和目标
+- 💻 技术实现细节
+- 🎨 用户界面与体验
+- 🔒 数据和安全
+- ⚠️ 边界情况处理
+- ⚖️ 权衡取舍
+- 🔗 集成和依赖
+- ✅ 测试和验收
+
+**访谈特点**：
+- ✅ 非显而易见的深入问题
+- ✅ 持续多轮直到需求明确
+- ✅ 生成详细的需求规范文档
+- ✅ 根据规范自动拆分任务
+
+详见：[访谈指南](INTERVIEW-GUIDE.md)
+
+#### 1️⃣ Claude 规划任务
+
+访谈完成后，Claude 会：
+1. 生成需求规范文档（`planning/specs/`）
+2. 根据规范拆分任务
+3. 写入任务板（`planning/codex-tasks.md`）
+
+```bash
 # 或手动编辑任务板
 vim planning/codex-tasks.md
 ```
@@ -186,7 +222,7 @@ cat planning/codex-tasks.md
 /dual-ai-collab status
 
 # 或手动查看
-cat planning/codex-tasks.md | grep "状态:"
+cat planning/codex-tasks.md | grep -E "\*\*状态\*\*:|状态:"
 ```
 
 ---
@@ -516,9 +552,8 @@ jobs:
 
 ## 📞 联系方式
 
-- GitHub Issues: [提交问题](https://github.com/yourusername/dual-ai-collab/issues)
-- Email: your.email@example.com
-- Twitter: [@yourusername](https://twitter.com/yourusername)
+- GitHub Issues: [提交问题](https://github.com/your-username/dual-ai-collab/issues)（请替换为实际仓库地址）
+- 项目文档: 查看本仓库的 README 和 docs 目录
 
 ---
 
