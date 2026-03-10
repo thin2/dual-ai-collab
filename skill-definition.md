@@ -1,6 +1,6 @@
 # Dual AI Collaboration - 架构设计文档
 
-**版本**: 2.0.0
+**版本**: 2.1.0
 **最后更新**: 2026-03-10
 **状态**: 正式发布
 
@@ -122,18 +122,15 @@ Skill 内部使用 Claude Code 内置工具，无需外部依赖：
 
 ## 目录结构
 
-v2.0.0 自包含版，克隆仓库即可使用：
+v2.1.0 自包含版，克隆仓库即可使用：
 
 ```
 dual-ai-collab/
 ├── skill/
-│   └── dual-ai-collab.md       # 核心 Skill 文件（安装到 ~/.claude/skills/）
-├── scripts/                    # 辅助脚本（非必需，可提升效率）
-│   ├── init.sh                 # 快速初始化项目目录
-│   └── status.sh               # 查看任务板统计
-├── tests/                      # 测试套件
-│   ├── test-skill-format.sh    # 验证 Skill 文件格式
-│   └── test-task-board.sh      # 验证任务板格式
+│   ├── dual-ai-collab.md       # 核心 Skill 文件（安装到 ~/.claude/skills/）
+│   └── CHANGELOG.md            # 版本更新日志
+├── tests/                      # 测试套件（65 个测试用例）
+│   └── run_all_tests.sh
 └── planning/                   # 运行时生成（不提交到版本库）
     ├── codex-tasks.md          # 任务板（Codex 的工作队列）
     └── specs/                  # 需求规范文档
@@ -144,7 +141,6 @@ dual-ai-collab/
 
 - `skill/dual-ai-collab.md` 是唯一必需文件，其余均为辅助
 - `planning/` 目录在运行时由 Claude 自动创建，建议加入 `.gitignore`
-- `scripts/` 和 `tests/` 对非技术用户完全透明，可忽略
 
 ---
 
@@ -296,23 +292,18 @@ Codex 在读取任务板后，使用以下策略选取下一个任务：
 
 ## 未来路线图
 
-### v2.1.0（近期）
-
-- 支持 Codex 并行执行多个独立任务（当前为串行）
-- 任务板自动生成 HTML 进度报告
-- 审计报告模板标准化
-
-### v2.2.0（中期）
+### v2.2.0（近期）
 
 - 支持多个需求规范文档合并到同一任务板
 - 任务依赖关系可视化（ASCII DAG）
 - REJECTED 任务自动生成修复指引
+- 审计报告模板标准化
 
 ### v3.0.0（长期）
 
-- 支持 Claude + 多个 Codex 实例并行协作
 - 任务板支持 JSON 格式（同时保留 Markdown 可读性）
 - 与 GitHub Issues / Linear 等项目管理工具集成
+- HTML 进度报告导出
 
 ---
 

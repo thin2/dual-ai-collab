@@ -3,13 +3,13 @@
 > Claude（架构师/审计员）+ Codex（开发工程师）= 高效协作开发
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)](https://github.com/thin2/dual-ai-collab)
+[![Version](https://img.shields.io/badge/version-2.1.0-blue.svg)](https://github.com/thin2/dual-ai-collab)
 
 ## 简介
 
 双 AI 协作框架，让 Claude 和 Codex 分工协作：Claude 负责需求分析、架构设计、代码审计；Codex 负责代码实现。两者通过共享任务板（Task Board）异步协作，无需人工中转。
 
-**v2.0.0 亮点**：完全自包含，只需复制一个 `.md` 文件即可开箱即用，不再依赖外部脚本或配置文件。
+**v2.1.0 亮点**：支持多 Worker 并行执行、任务依赖管理、进度报告生成。完全自包含，只需复制一个 `.md` 文件即可开箱即用。
 
 ## 快速安装
 
@@ -100,12 +100,14 @@ Claude 审计代码 --> VERIFIED (通过) 或 REJECTED (需修复)
 ```
 dual-ai-collab/
 ├── skill/
-│   └── dual-ai-collab.md    # 核心 Skill 文件（唯一必需文件）
-├── tests/
-│   └── run_all_tests.sh     # 测试套件（39 个测试用例）
+│   ├── dual-ai-collab.md    # 核心 Skill 文件（唯一必需文件）
+│   └── CHANGELOG.md         # 版本更新日志
+├── tests/                    # 测试套件
+│   └── run_all_tests.sh
 ├── planning/                 # 任务板和需求规范（运行时生成）
 ├── INSTALL-GUIDE.md         # 详细安装指南
 ├── INTERVIEW-GUIDE.md       # 访谈指南
+├── skill-definition.md      # 架构设计文档
 └── LICENSE
 ```
 

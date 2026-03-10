@@ -22,11 +22,12 @@ Claude 深入访谈（使用 AskUserQuestion）
 
 ## 📝 第 1 步：启动访谈流程
 
-### 方式 1：通过脚本启动
+### 方式 1：使用魔法词
 
-```bash
-cd /home/hn/projects/dual-ai-collab
-bash scripts/claude-interview.sh "用户认证系统"
+在 Claude Code 对话框中输入：
+
+```
+双 AI 协作
 ```
 
 ### 方式 2：直接告诉 Claude
@@ -363,10 +364,10 @@ Claude 会使用 **AskUserQuestion** 工具对你进行多轮访谈，涵盖：
 
 ## 🚀 第 5 步：启动 Codex Worker
 
-任务板创建完成后，启动 Codex 开始开发：
+任务板创建完成后，告诉 Claude 启动 Codex 开发：
 
-```bash
-bash scripts/start-codex.sh -t
+```
+启动 Codex 开发
 ```
 
 ---
@@ -519,8 +520,8 @@ Claude 创建任务板：
 
 #### 5. 启动开发
 
-```bash
-bash scripts/start-codex.sh -t
+```
+启动 Codex 开发
 ```
 
 ---
