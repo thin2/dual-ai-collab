@@ -1,746 +1,320 @@
-# Dual AI Collaboration Skill
+# Dual AI Collaboration - 架构设计文档
 
-**Skill Name**: `dual-ai-collab`
-**Aliases**: `codex-claude`, `ai-pair`, `dual-dev`
-**Version**: 1.0.0
-**Author**: Claude + User
-**Category**: Workflow Orchestration
+**版本**: 2.0.0
+**最后更新**: 2026-03-10
+**状态**: 正式发布
 
 ---
 
-## 概述
+## 目录
 
-双 AI 协作模式：Claude 担任架构师/审计员，Codex 担任开发工程师，通过共享任务板进行异步协作。
-
-### 核心理念
-
-- **Claude（架构师/审计员）**：负责需求分析、架构设计、代码审计、质量验收
-- **Codex（开发工程师）**：负责具体代码实现、功能开发、bug 修复
-- **任务板（Task Board）**：唯一协作接口，记录任务状态和优先级
+1. [核心架构](#核心架构)
+2. [实现方式](#实现方式)
+3. [工作流程](#工作流程)
+4. [目录结构](#目录结构)
+5. [任务状态机](#任务状态机)
+6. [任务板格式规范](#任务板格式规范)
+7. [设计决策记录](#设计决策记录)
+8. [未来路线图](#未来路线图)
 
 ---
 
-## 使用场景
+## 核心架构
 
-- ✅ 大型项目开发（需要架构设计 + 快速实现）
-- ✅ 代码质量要求高（需要审计验收）
-- ✅ 前后端分离项目
-- ✅ 需要持续迭代的项目
-- ✅ 团队协作模式模拟
+### 角色分工
+
+| 角色 | 身份 | 职责 |
+|------|------|------|
+| Claude | 架构师 / 审计员 | 需求访谈、规范生成、任务拆分、代码审计、质量验收 |
+| Codex | 开发工程师 | 读取任务板、实现代码、更新任务状态 |
+| 任务板 | 协作接口 | 唯一信息交换媒介，记录任务定义、状态、验收标准 |
+
+### 协作原则
+
+- **异步协作**：Claude 和 Codex 通过任务板异步通信，互不阻塞
+- **单一真相来源**：`planning/codex-tasks.md` 是任务状态的唯一权威
+- **验收驱动**：每个任务必须有明确的验收标准，Claude 依据标准审计
+- **自包含运行**：无需外部服务或数据库，纯文件驱动
+
+---
+
+## 实现方式
+
+### 纯 Markdown Skill（非 TypeScript SDK）
+
+v2.0.0 完全放弃了 TypeScript 实现，改用纯 Markdown Skill 文件。
+
+**安装路径**
+
+```
+~/.claude/skills/dual-ai-collab.md
+```
+
+**触发方式**
+
+关键词触发（Claude Code 自动识别）：
+
+```
+双 AI 协作 / dual ai / codex 协作 / 自动开发 / 访谈开发 / 审计代码 / 审查任务
+```
+
+魔法词触发：
+
+```
+启动双 AI / 开始协作 / 深入访谈 / 审计代码
+```
+
+**执行工具**
+
+Skill 内部使用 Claude Code 内置工具，无需外部依赖：
+
+- `Bash` - 初始化目录、运行检查
+- `Read` - 读取任务板和需求文档
+- `Write` - 生成需求规范、创建任务板
+- `Edit` - 更新任务状态
+- `AskUserQuestion` - 执行用户访谈
 
 ---
 
 ## 工作流程
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Claude (架构师/审计员)                 │
-│  - 需求分析                                              │
-│  - 架构设计                                              │
-│  - 创建任务（写入任务板）                                │
-│  - 代码审计                                              │
-│  - 质量验收                                              │
-│  - 更新任务状态                                          │
-└─────────────────┬───────────────────────────────────────┘
-                  │
-                  ▼
-         ┌────────────────────┐
-         │   任务板 (Task Board)  │
-         │  planning/codex-tasks.md │
-         │                    │
-         │  - 任务列表        │
-         │  - 优先级          │
-         │  - 状态跟踪        │
-         │  - 验收标准        │
-         └────────┬───────────┘
-                  │
-                  ▼
-┌─────────────────────────────────────────────────────────┐
-│                    Codex (开发工程师)                     │
-│  - 读取任务板                                            │
-│  - 执行最高优先级任务                                    │
-│  - 编写代码                                              │
-│  - 提交代码                                              │
-│  - 更新任务进度                                          │
-└─────────────────────────────────────────────────────────┘
+用户需求
+    |
+    v
+[第 1 步] Claude 初始询问（AskUserQuestion）
+    |      了解用户想开发什么功能
+    |
+    v
+[第 2 步] Claude 深入访谈（5-10 轮 AskUserQuestion）
+    |      覆盖：功能范围、技术栈、UI、数据安全、边界情况、权衡取舍
+    |
+    v
+[第 3 步] Claude 生成需求规范（Write）
+    |      输出：planning/specs/YYYYMMDD-HHMMSS-[功能名].md
+    |
+    v
+[第 4 步] Claude 拆分任务写入任务板（Write）
+    |      输出：planning/codex-tasks.md
+    |      每个任务包含：描述、优先级、验收标准
+    |
+    v
+[第 5 步] 用户确认（AskUserQuestion）
+    |      展示任务概览，询问是否继续
+    |
+    v
+[第 6 步] Codex 执行开发
+    |      读取任务板 -> 选取最高优先级 OPEN 任务
+    |      实现代码 -> 更新状态为 IN_PROGRESS -> DONE
+    |
+    v
+[第 7 步] Claude 审计代码
+    |      读取 DONE 任务对应的代码文件
+    |      逐项检查验收标准
+    |      评分并更新状态为 VERIFIED 或 REJECTED
+    |
+    v
+[验收通过] 所有任务 VERIFIED -> 项目完成
+[验收失败] REJECTED 任务 -> 返回第 6 步修复 -> 再次审计
 ```
 
 ---
 
-## Skill 实现
+## 目录结构
 
-### 触发关键词
+v2.0.0 自包含版，克隆仓库即可使用：
 
-- `dual ai collab`
-- `codex claude collab`
-- `ai pair programming`
-- `双 AI 协作`
-
-### 参数
-
-```yaml
-mode:
-  - init: 初始化协作环境
-  - plan: Claude 规划任务
-  - dev: 启动 Codex 开发
-  - audit: Claude 审计代码
-  - status: 查看任务状态
-
-role:
-  - claude: 架构师/审计员模式
-  - codex: 开发工程师模式
 ```
+dual-ai-collab/
+├── skill/
+│   └── dual-ai-collab.md       # 核心 Skill 文件（安装到 ~/.claude/skills/）
+├── scripts/                    # 辅助脚本（非必需，可提升效率）
+│   ├── init.sh                 # 快速初始化项目目录
+│   └── status.sh               # 查看任务板统计
+├── tests/                      # 测试套件
+│   ├── test-skill-format.sh    # 验证 Skill 文件格式
+│   └── test-task-board.sh      # 验证任务板格式
+└── planning/                   # 运行时生成（不提交到版本库）
+    ├── codex-tasks.md          # 任务板（Codex 的工作队列）
+    └── specs/                  # 需求规范文档
+        └── YYYYMMDD-HHMMSS-[功能名].md
+```
+
+**说明**
+
+- `skill/dual-ai-collab.md` 是唯一必需文件，其余均为辅助
+- `planning/` 目录在运行时由 Claude 自动创建，建议加入 `.gitignore`
+- `scripts/` 和 `tests/` 对非技术用户完全透明，可忽略
 
 ---
 
-## 使用方法
+## 任务状态机
 
-### 1. 初始化协作环境
-
-```bash
-/dual-ai-collab init
+```
+          创建
+           |
+           v
+         OPEN
+           |
+    Codex 领取任务
+           |
+           v
+       IN_PROGRESS
+           |
+    Codex 完成实现
+           |
+           v
+          DONE
+           |
+      Claude 审计
+          / \
+         /   \
+        v     v
+    VERIFIED  REJECTED
+    (通过)    (退回修复)
+                |
+         Codex 修复后
+                |
+                v
+          IN_PROGRESS
+          (重新循环)
 ```
 
-**执行内容**：
-- 创建任务板文件 `planning/codex-tasks.md`
-- 创建协作配置 `.dual-ai-collab.yml`
-- 创建进度记录目录 `planning/progress/`
+附加状态：
 
-### 2. Claude 规划任务
+- `BLOCKED` - 存在外部依赖阻塞，需要人工介入
 
-```bash
-/dual-ai-collab plan "开发 Vue 前端"
-```
+状态转换规则：
 
-**执行内容**：
-- 分析需求
-- 设计架构
-- 拆分任务
-- 写入任务板（带优先级和验收标准）
-
-### 3. 启动 Codex 开发
-
-```bash
-/dual-ai-collab dev
-```
-
-**执行内容**：
-- 读取任务板
-- 执行最高优先级的 OPEN 任务
-- 编写代码
-- 更新任务状态为 IN_PROGRESS → DONE
-
-### 4. Claude 审计代码
-
-```bash
-/dual-ai-collab audit
-```
-
-**执行内容**：
-- 读取 Codex 完成的代码
-- 执行代码审计（质量、规范、性能、安全）
-- 生成审计报告
-- 更新任务状态（VERIFIED 或 REJECTED）
-
-### 5. 查看任务状态
-
-```bash
-/dual-ai-collab status
-```
-
-**执行内容**：
-- 显示任务板概览
-- 统计任务完成情况
-- 显示当前阻塞项
+- 只有 Codex 可以将任务从 `OPEN` 移动到 `IN_PROGRESS`
+- 只有 Codex 可以将任务从 `IN_PROGRESS` 移动到 `DONE`
+- 只有 Claude 可以将任务从 `DONE` 移动到 `VERIFIED` 或 `REJECTED`
+- `REJECTED` 任务必须附带审计意见，说明具体问题
 
 ---
 
-## 任务板格式
+## 任务板格式规范
 
-### 文件位置
-`planning/codex-tasks.md`
+**文件路径**: `planning/codex-tasks.md`
 
-### 任务格式
+### 文件头
 
 ```markdown
-## 任务 #001: 实现用户登录功能
+# Codex 任务板 - [功能名称]
 
-**优先级**: P1 (高)
+**创建时间**: YYYY-MM-DD HH:MM:SS
+**规范文档**: planning/specs/YYYYMMDD-HHMMSS-[功能名称].md
+**总任务数**: N
+**预计总工时**: N 小时
+
+---
+```
+
+### 任务条目格式
+
+```markdown
+## 任务 #001: [任务标题]
+
+**优先级**: P1
 **状态**: OPEN
 **分配给**: Codex
-**创建时间**: 2026-03-02
-**预计工时**: 2小时
+**创建时间**: YYYY-MM-DD
+**预计工时**: N 小时
+**依赖任务**: 无 / #XXX
+**完成时间**: -
+**审计评分**: -
+**审计意见**: -
 
 ### 任务描述
-实现用户登录功能，包括表单验证、API 调用、Token 存储。
+[详细描述任务内容和背景]
 
 ### 技术要求
-- 使用 Vue 3 Composition API
-- 表单验证使用 Element Plus
-- Token 存储到 localStorage
-- 错误处理和提示
+- [具体技术约束或要求]
 
 ### 验收标准
-- [ ] 表单验证正确（用户名/密码必填）
-- [ ] API 调用成功
-- [ ] Token 正确存储
-- [ ] 错误提示友好
-- [ ] 代码符合 ESLint 规范
+- [ ] [可验证的具体标准]
 
 ### 相关文件
-- `src/views/Login.vue`
-- `src/api/auth.js`
-- `src/stores/auth.js`
+- `path/to/file.ext`
 
 ---
 ```
 
-### 任务状态
+### 字段约束
 
-- `OPEN`: 待开始
-- `IN_PROGRESS`: 进行中
-- `DONE`: 已完成（待审计）
-- `VERIFIED`: 已验收通过
-- `REJECTED`: 审计未通过（需修复）
-- `BLOCKED`: 阻塞中
-
----
-
-## 配置文件
-
-### `.dual-ai-collab.yml`
-
-```yaml
-# 双 AI 协作配置
-
-project:
-  name: "Youtu-GraphRAG"
-  type: "fullstack"
-
-roles:
-  claude:
-    responsibilities:
-      - "需求分析"
-      - "架构设计"
-      - "代码审计"
-      - "质量验收"
-    output_dir: "planning/progress/"
-
-  codex:
-    responsibilities:
-      - "代码实现"
-      - "功能开发"
-      - "Bug 修复"
-    working_dir: "."
-
-task_board:
-  path: "planning/codex-tasks.md"
-  priorities: ["P1", "P2", "P3"]
-  statuses: ["OPEN", "IN_PROGRESS", "DONE", "VERIFIED", "REJECTED", "BLOCKED"]
-
-audit:
-  enabled: true
-  criteria:
-    - "代码质量"
-    - "设计规范"
-    - "性能优化"
-    - "安全性"
-    - "可维护性"
-  report_dir: "planning/progress/"
-
-notifications:
-  on_task_complete: true
-  on_audit_complete: true
-```
+| 字段 | 允许值 | 说明 |
+|------|--------|------|
+| 优先级 | P1 / P2 / P3 | P1 最高，Codex 优先选取 |
+| 状态 | OPEN / IN_PROGRESS / DONE / VERIFIED / REJECTED / BLOCKED | 状态机见上节 |
+| 分配给 | Codex / Claude | 当前责任方 |
+| 审计评分 | 0-100 / - | 由 Claude 填写 |
 
 ---
 
-## 实现代码
+## 设计决策记录
 
-### Skill Handler (TypeScript)
+### 决策 1：选择纯 Markdown 而非 TypeScript
 
-```typescript
-// ~/.claude/skills/dual-ai-collab/index.ts
+**背景**：v1.0.0 设计了一套基于 `@claude/skill-sdk` 的 TypeScript 实现，涉及 `DualAICollabSkill` 类、`SkillContext` 接口等。
 
-import { Skill, SkillContext } from '@claude/skill-sdk'
-import fs from 'fs/promises'
-import path from 'path'
+**问题**：
+- `@claude/skill-sdk` 不存在，该 SDK 从未发布
+- TypeScript 实现引入了编译步骤、node_modules 依赖、类型定义维护成本
+- 用户安装体验差：需要 `npm install`、`tsc` 编译等前置步骤
 
-interface DualAICollabOptions {
-  mode: 'init' | 'plan' | 'dev' | 'audit' | 'status'
-  role?: 'claude' | 'codex'
-  task?: string
-}
+**决策**：改用纯 Markdown Skill 文件，Claude Code 原生支持加载。
 
-export class DualAICollabSkill extends Skill {
-  name = 'dual-ai-collab'
-  aliases = ['codex-claude', 'ai-pair', 'dual-dev']
+**结果**：
+- 安装：复制一个文件到 `~/.claude/skills/` 即可
+- 零依赖：不需要 Node.js、npm 或任何外部包
+- 逻辑透明：Skill 内容即文档，用户可直接阅读和修改
 
-  async execute(ctx: SkillContext, options: DualAICollabOptions) {
-    const { mode, role, task } = options
+### 决策 2：自包含设计（用户体验优先）
 
-    switch (mode) {
-      case 'init':
-        return await this.initEnvironment(ctx)
-      case 'plan':
-        return await this.planTasks(ctx, task)
-      case 'dev':
-        return await this.startDevelopment(ctx)
-      case 'audit':
-        return await this.auditCode(ctx)
-      case 'status':
-        return await this.showStatus(ctx)
-      default:
-        throw new Error(`Unknown mode: ${mode}`)
-    }
-  }
+**背景**：早期版本将 Skill 和辅助脚本分散在多个位置，安装步骤繁琐。
 
-  private async initEnvironment(ctx: SkillContext) {
-    const projectRoot = ctx.workingDirectory
+**决策**：将核心逻辑完全内嵌在 `skill/dual-ai-collab.md` 单文件中，辅助脚本作为可选项。
 
-    // 创建任务板
-    const taskBoardPath = path.join(projectRoot, 'planning/codex-tasks.md')
-    await fs.mkdir(path.dirname(taskBoardPath), { recursive: true })
-    await fs.writeFile(taskBoardPath, this.getTaskBoardTemplate())
+**结果**：
+- 用户只需操作一个文件即可完整使用所有功能
+- 辅助脚本存在时提升效率，不存在时功能不受影响
+- `planning/` 目录由 Skill 自动创建，用户无需手动准备
 
-    // 创建配置文件
-    const configPath = path.join(projectRoot, '.dual-ai-collab.yml')
-    await fs.writeFile(configPath, this.getConfigTemplate())
+### 决策 3：awk 任务调度算法
 
-    // 创建进度目录
-    await fs.mkdir(path.join(projectRoot, 'planning/progress'), { recursive: true })
+Codex 在读取任务板后，使用以下策略选取下一个任务：
 
-    return {
-      success: true,
-      message: '✅ 双 AI 协作环境初始化完成',
-      files: [taskBoardPath, configPath]
-    }
-  }
+1. 过滤状态为 `OPEN` 的任务
+2. 按优先级排序（P1 > P2 > P3）
+3. 同优先级内按任务编号升序（即创建顺序）
+4. 检查依赖任务是否均已 `VERIFIED`，未满足则跳过
+5. 选取第一个满足条件的任务，更新状态为 `IN_PROGRESS`
 
-  private async planTasks(ctx: SkillContext, taskDescription: string) {
-    // 调用 planner agent 分析任务
-    const plan = await ctx.callAgent('oh-my-claudecode:planner', {
-      prompt: `分析以下需求并拆分为具体任务：\n${taskDescription}`,
-      model: 'opus'
-    })
-
-    // 写入任务板
-    const taskBoardPath = path.join(ctx.workingDirectory, 'planning/codex-tasks.md')
-    const tasks = this.formatTasks(plan.tasks)
-    await fs.appendFile(taskBoardPath, tasks)
-
-    return {
-      success: true,
-      message: `✅ 已创建 ${plan.tasks.length} 个任务`,
-      tasks: plan.tasks
-    }
-  }
-
-  private async startDevelopment(ctx: SkillContext) {
-    // 读取任务板
-    const taskBoardPath = path.join(ctx.workingDirectory, 'planning/codex-tasks.md')
-    const taskBoard = await fs.readFile(taskBoardPath, 'utf-8')
-
-    // 找到最高优先级的 OPEN 任务
-    const nextTask = this.findNextTask(taskBoard)
-
-    if (!nextTask) {
-      return {
-        success: true,
-        message: '✅ 所有任务已完成！'
-      }
-    }
-
-    // 调用 executor agent 执行任务
-    const result = await ctx.callAgent('oh-my-claudecode:executor', {
-      prompt: `执行以下任务：\n${nextTask.description}\n\n验收标准：\n${nextTask.criteria}`,
-      model: 'sonnet'
-    })
-
-    // 更新任务状态
-    await this.updateTaskStatus(taskBoardPath, nextTask.id, 'DONE')
-
-    return {
-      success: true,
-      message: `✅ 任务 #${nextTask.id} 已完成`,
-      task: nextTask
-    }
-  }
-
-  private async auditCode(ctx: SkillContext) {
-    // 读取任务板，找到 DONE 状态的任务
-    const taskBoardPath = path.join(ctx.workingDirectory, 'planning/codex-tasks.md')
-    const taskBoard = await fs.readFile(taskBoardPath, 'utf-8')
-    const doneTasks = this.findTasksByStatus(taskBoard, 'DONE')
-
-    if (doneTasks.length === 0) {
-      return {
-        success: true,
-        message: '✅ 没有待审计的任务'
-      }
-    }
-
-    // 对每个任务执行审计
-    const auditResults = []
-    for (const task of doneTasks) {
-      const result = await ctx.callAgent('oh-my-claudecode:code-reviewer', {
-        prompt: `审计以下任务的代码实现：\n${task.description}\n\n相关文件：\n${task.files.join('\n')}`,
-        model: 'opus'
-      })
-
-      auditResults.push({
-        taskId: task.id,
-        passed: result.score >= 90,
-        score: result.score,
-        issues: result.issues
-      })
-
-      // 更新任务状态
-      const newStatus = result.score >= 90 ? 'VERIFIED' : 'REJECTED'
-      await this.updateTaskStatus(taskBoardPath, task.id, newStatus)
-    }
-
-    // 生成审计报告
-    const reportPath = path.join(
-      ctx.workingDirectory,
-      `planning/progress/${new Date().toISOString().split('T')[0]}-audit.md`
-    )
-    await fs.writeFile(reportPath, this.formatAuditReport(auditResults))
-
-    return {
-      success: true,
-      message: `✅ 已审计 ${doneTasks.length} 个任务`,
-      results: auditResults,
-      reportPath
-    }
-  }
-
-  private async showStatus(ctx: SkillContext) {
-    const taskBoardPath = path.join(ctx.workingDirectory, 'planning/codex-tasks.md')
-    const taskBoard = await fs.readFile(taskBoardPath, 'utf-8')
-
-    const stats = {
-      total: 0,
-      open: 0,
-      inProgress: 0,
-      done: 0,
-      verified: 0,
-      rejected: 0,
-      blocked: 0
-    }
-
-    // 统计任务状态
-    const tasks = this.parseTasks(taskBoard)
-    tasks.forEach(task => {
-      stats.total++
-      stats[task.status.toLowerCase()] = (stats[task.status.toLowerCase()] || 0) + 1
-    })
-
-    return {
-      success: true,
-      stats,
-      tasks
-    }
-  }
-
-  // Helper methods
-  private getTaskBoardTemplate(): string {
-    return `# Codex 任务板
-
-## 任务列表
-
-<!-- 任务将自动添加到这里 -->
+这一逻辑通过 Bash + awk 实现，无需外部任务调度器，保持工具链简单。
 
 ---
 
-## 任务状态说明
+## 未来路线图
 
-- **OPEN**: 待开始
-- **IN_PROGRESS**: 进行中
-- **DONE**: 已完成（待审计）
-- **VERIFIED**: 已验收通过
-- **REJECTED**: 审计未通过（需修复）
-- **BLOCKED**: 阻塞中
+### v2.1.0（近期）
 
-## 优先级说明
+- 支持 Codex 并行执行多个独立任务（当前为串行）
+- 任务板自动生成 HTML 进度报告
+- 审计报告模板标准化
 
-- **P1**: 高优先级（紧急且重要）
-- **P2**: 中优先级（重要但不紧急）
-- **P3**: 低优先级（可延后）
-`
-  }
+### v2.2.0（中期）
 
-  private getConfigTemplate(): string {
-    return `# 双 AI 协作配置
+- 支持多个需求规范文档合并到同一任务板
+- 任务依赖关系可视化（ASCII DAG）
+- REJECTED 任务自动生成修复指引
 
-project:
-  name: "My Project"
-  type: "fullstack"
+### v3.0.0（长期）
 
-roles:
-  claude:
-    responsibilities:
-      - "需求分析"
-      - "架构设计"
-      - "代码审计"
-      - "质量验收"
-    output_dir: "planning/progress/"
-
-  codex:
-    responsibilities:
-      - "代码实现"
-      - "功能开发"
-      - "Bug 修复"
-    working_dir: "."
-
-task_board:
-  path: "planning/codex-tasks.md"
-  priorities: ["P1", "P2", "P3"]
-  statuses: ["OPEN", "IN_PROGRESS", "DONE", "VERIFIED", "REJECTED", "BLOCKED"]
-
-audit:
-  enabled: true
-  criteria:
-    - "代码质量"
-    - "设计规范"
-    - "性能优化"
-    - "安全性"
-    - "可维护性"
-  report_dir: "planning/progress/"
-`
-  }
-
-  private formatTasks(tasks: any[]): string {
-    return tasks.map((task, index) => `
-## 任务 #${String(index + 1).padStart(3, '0')}: ${task.title}
-
-**优先级**: ${task.priority}
-**状态**: OPEN
-**分配给**: Codex
-**创建时间**: ${new Date().toISOString().split('T')[0]}
-**预计工时**: ${task.estimatedHours}小时
-
-### 任务描述
-${task.description}
-
-### 技术要求
-${task.requirements.map(r => `- ${r}`).join('\n')}
-
-### 验收标准
-${task.criteria.map(c => `- [ ] ${c}`).join('\n')}
-
-### 相关文件
-${task.files.map(f => `- \`${f}\``).join('\n')}
-
----
-`).join('\n')
-  }
-
-  private findNextTask(taskBoard: string): any {
-    const tasks = this.parseTasks(taskBoard)
-    const openTasks = tasks.filter(t => t.status === 'OPEN')
-
-    // 按优先级排序
-    openTasks.sort((a, b) => {
-      const priorityOrder = { P1: 1, P2: 2, P3: 3 }
-      return priorityOrder[a.priority] - priorityOrder[b.priority]
-    })
-
-    return openTasks[0] || null
-  }
-
-  private findTasksByStatus(taskBoard: string, status: string): any[] {
-    const tasks = this.parseTasks(taskBoard)
-    return tasks.filter(t => t.status === status)
-  }
-
-  private parseTasks(taskBoard: string): any[] {
-    // 解析任务板内容
-    const taskRegex = /## 任务 #(\d+): (.+?)\n\n\*\*优先级\*\*: (P\d)\s+\n\*\*状态\*\*: (\w+)/g
-    const tasks = []
-    let match
-
-    while ((match = taskRegex.exec(taskBoard)) !== null) {
-      tasks.push({
-        id: match[1],
-        title: match[2],
-        priority: match[3],
-        status: match[4]
-      })
-    }
-
-    return tasks
-  }
-
-  private async updateTaskStatus(taskBoardPath: string, taskId: string, newStatus: string) {
-    let content = await fs.readFile(taskBoardPath, 'utf-8')
-    const regex = new RegExp(`(## 任务 #${taskId}:.*?\\n\\n.*?\\*\\*状态\\*\\*: )\\w+`, 's')
-    content = content.replace(regex, `$1${newStatus}`)
-    await fs.writeFile(taskBoardPath, content)
-  }
-
-  private formatAuditReport(results: any[]): string {
-    return `# 代码审计报告
-
-**审计时间**: ${new Date().toISOString()}
-**审计任务数**: ${results.length}
-
-## 审计结果
-
-${results.map(r => `
-### 任务 #${r.taskId}
-
-**评分**: ${r.score}/100
-**状态**: ${r.passed ? '✅ 通过' : '❌ 未通过'}
-
-${r.issues.length > 0 ? `
-**发现的问题**:
-${r.issues.map(i => `- ${i}`).join('\n')}
-` : '无问题'}
-
----
-`).join('\n')}
-
-## 总结
-
-- 通过: ${results.filter(r => r.passed).length}
-- 未通过: ${results.filter(r => !r.passed).length}
-`
-  }
-}
-
-export default new DualAICollabSkill()
-```
+- 支持 Claude + 多个 Codex 实例并行协作
+- 任务板支持 JSON 格式（同时保留 Markdown 可读性）
+- 与 GitHub Issues / Linear 等项目管理工具集成
 
 ---
 
-## 使用示例
-
-### 完整工作流程
-
-```bash
-# 1. 初始化协作环境
-/dual-ai-collab init
-
-# 2. Claude 规划任务
-/dual-ai-collab plan "开发用户认证系统，包括登录、注册、密码重置功能"
-
-# 3. 启动 Codex 开发（自动执行最高优先级任务）
-/dual-ai-collab dev
-
-# 4. Claude 审计代码
-/dual-ai-collab audit
-
-# 5. 查看任务状态
-/dual-ai-collab status
-
-# 6. 如果有 REJECTED 任务，Codex 修复后再次审计
-/dual-ai-collab dev
-/dual-ai-collab audit
-
-# 7. 重复步骤 3-6 直到所有任务完成
-```
-
----
-
-## 高级用法
-
-### 自定义审计标准
-
-编辑 `.dual-ai-collab.yml`:
-
-```yaml
-audit:
-  enabled: true
-  criteria:
-    - "代码质量"
-    - "设计规范"
-    - "性能优化"
-    - "安全性"
-    - "可维护性"
-    - "测试覆盖率"  # 新增
-    - "文档完整性"  # 新增
-  min_score: 90  # 最低通过分数
-```
-
-### 并行开发
-
-```bash
-# 启动多个 Codex 实例并行开发
-/dual-ai-collab dev --parallel 3
-```
-
-### 持续集成
-
-```bash
-# 自动化流程：开发 → 审计 → 修复 → 验证
-/dual-ai-collab auto --max-iterations 10
-```
-
----
-
-## 最佳实践
-
-### 1. 任务拆分原则
-- 每个任务应该是独立的、可测试的
-- 任务粒度：2-4 小时完成
-- 明确的验收标准（至少 3 条）
-
-### 2. 审计频率
-- P1 任务：每个任务完成后立即审计
-- P2/P3 任务：批量审计（3-5 个任务）
-
-### 3. 沟通机制
-- 使用任务板作为唯一真相来源
-- 审计报告详细记录问题和建议
-- 定期同步进度（每日/每周）
-
-### 4. 质量保证
-- 代码审计评分 ≥ 90 分才能通过
-- 所有验收标准必须满足
-- 关键功能需要测试覆盖
-
----
-
-## 故障排除
-
-### 问题 1: 任务板解析失败
-**原因**: 任务格式不符合规范
-**解决**: 使用 `/dual-ai-collab init` 重新初始化
-
-### 问题 2: Codex 找不到任务
-**原因**: 所有任务都不是 OPEN 状态
-**解决**: 检查任务板，手动将任务状态改为 OPEN
-
-### 问题 3: 审计一直不通过
-**原因**: 审计标准过于严格
-**解决**: 调整 `.dual-ai-collab.yml` 中的 `min_score`
-
----
-
-## 贡献指南
-
-欢迎提交 Issue 和 Pull Request！
-
-**GitHub 仓库**: https://github.com/yourusername/dual-ai-collab
-
----
-
-## 许可证
-
-MIT License
-
----
-
-## 更新日志
-
-### v1.0.0 (2026-03-02)
-- ✅ 初始版本发布
-- ✅ 支持任务规划、开发、审计
-- ✅ 支持任务状态跟踪
-- ✅ 支持审计报告生成
-
----
-
-**作者**: Claude + User
-**最后更新**: 2026-03-02
+**维护者**: Claude + User
+**协议**: MIT

@@ -1,7 +1,7 @@
 ---
 name: dual-ai-collab
-version: 2.0.0
-description: 双 AI 协作开发模式 - Claude 深入访谈 + 规范生成 + Codex 自动开发（开箱即用）
+version: 2.1.0
+description: 双 AI 协作开发模式 - Claude 深入访谈 + 规范生成 + Codex 自动开发（开箱即用，支持并行执行和依赖管理）
 author: Claude + User
 category: workflow
 
@@ -255,6 +255,56 @@ command -v codex && echo "CODEX_OK" || echo "CODEX_MISSING"
 ---
 ```
 
+#### 依赖任务字段说明
+
+`**依赖任务**` 字段用于声明当前任务必须在哪些任务完成后才能开始执行。
+
+**格式**：
+- `**依赖任务**: 无` — 无依赖，可随时执行（也可并行执行）
+- `**依赖任务**: #001` — 依赖单个任务
+- `**依赖任务**: #001, #002` — 依赖多个任务，所有列出的任务都必须完成
+
+**任务领取时的依赖检查**：在领取任务前，使用以下 awk 逻辑验证依赖任务是否已完成（状态为 DONE 或 VERIFIED）：
+
+```bash
+# 检查任务 #XXX 的依赖是否全部完成
+check_deps() {
+    local task_num=$1
+    # 提取依赖列表
+    DEPS=$(awk "/## 任务 #${task_num}:/,/^---$/" planning/codex-tasks.md \
+        | awk '/\*\*依赖任务\*\*:/ { gsub(/.*依赖任务\*\*: /, ""); gsub(/#/, ""); print }')
+
+    if [ "$DEPS" = "无" ] || [ -z "$DEPS" ]; then
+        echo "NO_DEPS"
+        return 0
+    fi
+
+    # 逐一检查每个依赖任务的状态
+    ALL_DONE=true
+    for DEP in $(echo "$DEPS" | tr ',' ' '); do
+        DEP=$(echo "$DEP" | tr -d ' ')
+        STATUS=$(awk "/## 任务 #${DEP}:/,/^---$/" planning/codex-tasks.md \
+            | awk '/\*\*状态\*\*:/ { gsub(/.*状态\*\*: /, ""); print; exit }')
+        if [ "$STATUS" != "DONE" ] && [ "$STATUS" != "VERIFIED" ]; then
+            echo "BLOCKED: 依赖任务 #${DEP} 状态为 ${STATUS}，尚未完成"
+            ALL_DONE=false
+        fi
+    done
+
+    $ALL_DONE && echo "DEPS_OK" || return 1
+}
+
+# 使用示例：领取任务前先检查
+RESULT=$(check_deps "003")
+if [ "$RESULT" = "DEPS_OK" ] || [ "$RESULT" = "NO_DEPS" ]; then
+    echo "可以执行任务 #003"
+else
+    echo "$RESULT，跳过该任务"
+fi
+```
+
+**执行原则**：如果依赖未完成，跳过该任务，继续寻找下一个可执行的 OPEN 任务，避免阻塞整个流程。
+
 ### 第 5 步：询问是否继续开发
 
 任务板创建完成后，**不要自动启动开发**，展示摘要并询问用户：
@@ -399,6 +449,86 @@ codex "你是一个专业的开发工程师，正在执行以下任务：
 
 每个任务完成后，向用户报告进度。
 
+### 第 7 步：多 Worker 并行执行（可选）
+
+如果任务板中有多个互相独立的 OPEN 任务，可以同时启动多个 Codex 实例并行处理，显著缩短整体开发时间。
+
+**前提条件**：并行的任务之间不能有依赖关系（`**依赖任务**: 无`），否则必须按顺序执行。
+
+#### 7.1 识别可并行任务
+
+使用 Bash 工具查找所有无依赖的 OPEN 任务：
+
+```bash
+awk '
+    /## 任务 #[0-9]+:/ { task_id = $0; in_task = 1; has_dep = 0; is_open = 0 }
+    in_task && /\*\*状态\*\*: OPEN/ { is_open = 1 }
+    in_task && /\*\*依赖任务\*\*: 无/ { has_dep = 0 }
+    in_task && /\*\*依赖任务\*\*: #/ { has_dep = 1 }
+    in_task && /^---$/ {
+        if (is_open && !has_dep) print task_id
+        in_task = 0
+    }
+' planning/codex-tasks.md
+```
+
+#### 7.2 分配任务给不同 Worker
+
+使用 Bash 工具按优先级将任务分配给 Worker 1、Worker 2 等并发执行：
+
+```bash
+# 获取所有可并行的 OPEN 任务（无依赖），按优先级排序
+PARALLEL_TASKS=$(awk '
+    /## 任务 #([0-9]+):/ {
+        match($0, /## 任务 #([0-9]+):/, arr)
+        task_num = arr[1]
+        in_task = 1; is_open = 0; has_dep = 0; priority = 9
+    }
+    in_task && /\*\*状态\*\*: OPEN/ { is_open = 1 }
+    in_task && /\*\*优先级\*\*: P([0-9])/ { match($0, /P([0-9])/, p); priority = p[1] }
+    in_task && /\*\*依赖任务\*\*: 无/ { has_dep = 0 }
+    in_task && /\*\*依赖任务\*\*: #/ { has_dep = 1 }
+    in_task && /^---$/ {
+        if (is_open && !has_dep) printf "%d %s\n", priority, task_num
+        in_task = 0
+    }
+' planning/codex-tasks.md | sort -n | awk '{print $2}')
+
+# 将任务分配给 Worker（示例：Worker1 处理奇数序号任务，Worker2 处理偶数序号任务）
+WORKER=1
+for TASK_NUM in $PARALLEL_TASKS; do
+    # 标记为 IN_PROGRESS，并记录分配的 Worker
+    sed -i "/## 任务 #${TASK_NUM}:/,/^---$/ s/\*\*状态\*\*: OPEN/\*\*状态\*\*: IN_PROGRESS/" planning/codex-tasks.md
+    echo "Worker ${WORKER} <- 任务 #${TASK_NUM}"
+    WORKER=$(( WORKER % 2 + 1 ))   # 在 Worker1 和 Worker2 之间交替
+done
+```
+
+#### 7.3 并行启动 Codex 实例
+
+在不同终端或后台进程中分别启动 Codex，处理各自分配的任务：
+
+```bash
+# Worker 1：在后台执行分配给它的任务
+codex "执行任务 #001：[任务描述]" &
+WORKER1_PID=$!
+
+# Worker 2：在后台执行另一个独立任务
+codex "执行任务 #003：[任务描述]" &
+WORKER2_PID=$!
+
+# 等待所有 Worker 完成
+wait $WORKER1_PID && echo "Worker1 完成" || echo "Worker1 失败"
+wait $WORKER2_PID && echo "Worker2 完成" || echo "Worker2 失败"
+```
+
+#### 7.4 注意事项
+
+- 并行任务之间**不能有文件写入冲突**（避免两个 Worker 同时修改同一个文件）
+- 如果某个任务执行失败，使用 sed 将其状态从 IN_PROGRESS 回退为 OPEN，不影响其他 Worker
+- 建议并行数量不超过 3 个，避免资源竞争和日志混乱
+- 所有并行任务完成后，统一进行审计
+
 ---
 
 ## 审计流程（Claude 内联审计）
@@ -531,6 +661,131 @@ sed -i 's/\*\*状态\*\*: IN_PROGRESS/\*\*状态\*\*: OPEN/g' planning/codex-tas
 
 **问题 3：任务板格式错误**
 使用 Read 工具检查格式，用 Edit 工具修复。
+
+---
+
+## 进度报告
+
+当识别到以下触发词时，自动生成格式化的项目进度报告：
+
+**触发词**："生成报告"、"查看进度"、"项目进度"
+
+### 生成步骤
+
+1. 使用 Bash 工具统计任务板各状态数量
+2. 计算完成率、审计通过率、预估剩余时间
+3. 使用 Write 工具将报告写入 `planning/progress-reports/`
+
+### 统计命令
+
+```bash
+# 统计各状态任务数
+TOTAL=$(awk '/## 任务 #[0-9]+:/' planning/codex-tasks.md | wc -l)
+OPEN=$(awk '/\*\*状态\*\*: OPEN/ {c++} END {print c+0}' planning/codex-tasks.md)
+IN_PROGRESS=$(awk '/\*\*状态\*\*: IN_PROGRESS/ {c++} END {print c+0}' planning/codex-tasks.md)
+DONE=$(awk '/\*\*状态\*\*: DONE/ {c++} END {print c+0}' planning/codex-tasks.md)
+VERIFIED=$(awk '/\*\*状态\*\*: VERIFIED/ {c++} END {print c+0}' planning/codex-tasks.md)
+REJECTED=$(awk '/\*\*状态\*\*: REJECTED/ {c++} END {print c+0}' planning/codex-tasks.md)
+
+# 按优先级统计完成情况
+P1_TOTAL=$(awk '/\*\*优先级\*\*: P1/ {c++} END {print c+0}' planning/codex-tasks.md)
+P1_DONE=$(awk '
+    /## 任务 #/ { in_task=1; is_p1=0; is_done=0 }
+    in_task && /\*\*优先级\*\*: P1/ { is_p1=1 }
+    in_task && /\*\*状态\*\*: (DONE|VERIFIED)/ { is_done=1 }
+    in_task && /^---$/ { if (is_p1 && is_done) c++; in_task=0 }
+    END { print c+0 }
+' planning/codex-tasks.md)
+
+P2_TOTAL=$(awk '/\*\*优先级\*\*: P2/ {c++} END {print c+0}' planning/codex-tasks.md)
+P2_DONE=$(awk '
+    /## 任务 #/ { in_task=1; is_p2=0; is_done=0 }
+    in_task && /\*\*优先级\*\*: P2/ { is_p2=1 }
+    in_task && /\*\*状态\*\*: (DONE|VERIFIED)/ { is_done=1 }
+    in_task && /^---$/ { if (is_p2 && is_done) c++; in_task=0 }
+    END { print c+0 }
+' planning/codex-tasks.md)
+
+P3_TOTAL=$(awk '/\*\*优先级\*\*: P3/ {c++} END {print c+0}' planning/codex-tasks.md)
+P3_DONE=$(awk '
+    /## 任务 #/ { in_task=1; is_p3=0; is_done=0 }
+    in_task && /\*\*优先级\*\*: P3/ { is_p3=1 }
+    in_task && /\*\*状态\*\*: (DONE|VERIFIED)/ { is_done=1 }
+    in_task && /^---$/ { if (is_p3 && is_done) c++; in_task=0 }
+    END { print c+0 }
+' planning/codex-tasks.md)
+
+# 计算完成率（DONE + VERIFIED 视为完成）
+COMPLETED=$((DONE + VERIFIED))
+COMPLETION_RATE=$(awk "BEGIN { printf \"%.1f\", ($COMPLETED / ($TOTAL > 0 ? $TOTAL : 1)) * 100 }")
+
+# 计算审计通过率（VERIFIED / (DONE + VERIFIED + REJECTED)）
+AUDITED=$((VERIFIED + REJECTED))
+AUDIT_RATE=$(awk "BEGIN { printf \"%.1f\", ($VERIFIED / ($AUDITED > 0 ? $AUDITED : 1)) * 100 }")
+
+# 预估剩余时间（假设每个 OPEN 任务平均 2 小时）
+REMAINING_HOURS=$((OPEN * 2))
+
+echo "统计完成：总任务=${TOTAL}, 完成率=${COMPLETION_RATE}%, 审计通过率=${AUDIT_RATE}%, 预计剩余=${REMAINING_HOURS}h"
+```
+
+### 报告格式
+
+使用 Write 工具写入 `planning/progress-reports/YYYYMMDD-HHMMSS-progress.md`：
+
+```markdown
+# 项目进度报告
+
+**生成时间**: YYYY-MM-DD HH:MM:SS
+**任务板**: planning/codex-tasks.md
+
+---
+
+## 总进度
+
+| 指标 | 数值 |
+|------|------|
+| 总任务数 | X |
+| 已完成（DONE + VERIFIED） | X |
+| 完成率 | XX.X% |
+| 审计通过率 | XX.X% |
+| 预估剩余时间 | X 小时 |
+
+## 任务状态分布
+
+| 状态 | 数量 |
+|------|------|
+| OPEN（待开发） | X |
+| IN_PROGRESS（开发中） | X |
+| DONE（已完成待审计） | X |
+| VERIFIED（审计通过） | X |
+| REJECTED（审计不通过） | X |
+
+## 各优先级完成情况
+
+| 优先级 | 总数 | 已完成 | 完成率 |
+|--------|------|--------|--------|
+| P1（高优先级） | X | X | XX% |
+| P2（中优先级） | X | X | XX% |
+| P3（低优先级） | X | X | XX% |
+
+## 审计情况
+
+- 已审计任务：X 个
+- 审计通过（VERIFIED）：X 个
+- 审计不通过（REJECTED）：X 个
+- 审计通过率：XX.X%
+
+## 预估剩余时间
+
+- 待开发任务：X 个
+- 按每任务平均 2 小时估算
+- **预估剩余：X 小时**
+
+---
+
+*报告由 Dual AI Collaboration Skill v2.1.0 自动生成*
+```
 
 ---
 
