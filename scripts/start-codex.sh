@@ -80,18 +80,30 @@ run_background() {
         exit 1
     fi
 
-    # 等待一小段时间，确认进程仍在运行
+    # 等待一小段时间，确认进程状态
     sleep 1
-    if ! ps -p "$pid" > /dev/null 2>&1; then
-        echo -e "${RED}❌ 启动失败：进程立即退出${NC}"
-        echo "查看日志了解详情: tail -n 50 $LOG_DIR/codex-worker-nohup.log"
+    if ps -p "$pid" > /dev/null 2>&1; then
+        # 进程仍在运行 —— 正常启动
+        echo -e "${GREEN}✅ Codex Worker 已启动 (PID: $pid)${NC}"
+        echo "查看日志: $0 -l"
+        echo "停止 worker: $0 -s"
+    else
+        # 进程已退出 —— 区分正常完成与异常崩溃
+        local exit_code=0
+        wait "$pid" 2>/dev/null || exit_code=$?
         rm -f "$LOG_DIR/codex-worker.pid"
-        exit 1
-    fi
 
-    echo -e "${GREEN}✅ Codex Worker 已启动 (PID: $pid)${NC}"
-    echo "查看日志: $0 -l"
-    echo "停止 worker: $0 -s"
+        if [ $exit_code -eq 0 ]; then
+            # 退出码为 0：worker 正常完成（例如没有 OPEN 任务）
+            echo -e "${GREEN}✅ Codex Worker 已正常完成（无待处理任务）${NC}"
+            echo "查看日志了解详情: tail -n 20 $LOG_DIR/worker.log"
+        else
+            # 退出码非 0：异常崩溃
+            echo -e "${RED}❌ 启动失败：进程异常退出（退出码: $exit_code）${NC}"
+            echo "查看日志了解详情: tail -n 50 $LOG_DIR/codex-worker-nohup.log"
+            exit 1
+        fi
+    fi
 }
 
 # 在 tmux 中运行

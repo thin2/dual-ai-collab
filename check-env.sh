@@ -141,7 +141,7 @@ fi
 echo ""
 
 # 10. 检查任务板模板
-echo -e "${BLUE}[10/10] 检查任务板模板...${NC}"
+echo -e "${BLUE}[10/11] 检查任务板模板...${NC}"
 if [ -f templates/codex-tasks.md ]; then
     echo -e "${GREEN}✅ 任务板模板存在${NC}"
     PASS=$((PASS + 1))
@@ -152,7 +152,110 @@ else
 fi
 echo ""
 
+# 11. 功能性自检：验证任务领取逻辑
+echo -e "${BLUE}[11/11] 功能性自检：验证任务领取逻辑...${NC}"
+FUNC_TEST_DIR=$(mktemp -d)
+cat > "$FUNC_TEST_DIR/test-tasks.md" <<'TASKEOF'
+## 任务 #901: 低优先级测试任务
+
+**优先级**: P3
+**状态**: OPEN
+**分配给**: Codex
+
+### 任务描述
+这是一个 P3 测试任务
+
+---
+
+## 任务 #902: 高优先级测试任务
+
+**优先级**: P1
+**状态**: OPEN
+**分配给**: Codex
+
+### 任务描述
+这是一个 P1 测试任务
+
+---
+
+## 任务 #903: 已完成任务
+
+**优先级**: P1
+**状态**: DONE
+**分配给**: Codex
+
+### 任务描述
+这是一个已完成的任务
+
+---
+TASKEOF
+
+# 用 codex-auto-worker.sh 中相同的 awk 逻辑做自检
+PICKED_TASK=$(awk '
+    BEGIN { task_count = 0 }
+    /## 任务 #[0-9]+:/ {
+        if (in_task && task_content ~ /状态.*: OPEN/) {
+            tasks[task_count] = task_header "\n" task_content
+            priorities[task_count] = priority
+            task_count++
+        }
+        in_task = 1
+        task_header = $0
+        task_content = ""
+        priority = 9
+        next
+    }
+    in_task && /^---$/ {
+        if (task_content ~ /状态.*: OPEN/) {
+            tasks[task_count] = task_header "\n" task_content
+            priorities[task_count] = priority
+            task_count++
+        }
+        in_task = 0
+        task_content = ""
+        next
+    }
+    in_task {
+        task_content = task_content $0 "\n"
+        if ($0 ~ /优先级.*: P1/) { priority = 1 }
+        else if ($0 ~ /优先级.*: P2/) { priority = 2 }
+        else if ($0 ~ /优先级.*: P3/) { priority = 3 }
+    }
+    END {
+        if (task_count > 0) {
+            min_priority = 9; min_index = -1
+            for (i = 0; i < task_count; i++) {
+                if (priorities[i] < min_priority) {
+                    min_priority = priorities[i]; min_index = i
+                }
+            }
+            if (min_index >= 0) print tasks[min_index]
+        }
+    }
+' "$FUNC_TEST_DIR/test-tasks.md")
+
+FUNC_OK=true
+# 检查 1：能否领取到任务
+if echo "$PICKED_TASK" | grep -q "任务 #"; then
+    # 检查 2：是否优先选择了 P1 任务（#902 而非 #901）
+    if echo "$PICKED_TASK" | grep -q "#902"; then
+        echo -e "${GREEN}✅ 功能自检通过：正确领取 P1 优先任务 #902${NC}"
+        PASS=$((PASS + 1))
+    else
+        echo -e "${RED}❌ 功能自检失败：优先级调度错误（未选择 P1 任务）${NC}"
+        FUNC_OK=false
+        FAIL=$((FAIL + 1))
+    fi
+else
+    echo -e "${RED}❌ 功能自检失败：无法领取 OPEN 任务${NC}"
+    FUNC_OK=false
+    FAIL=$((FAIL + 1))
+fi
+rm -rf "$FUNC_TEST_DIR"
+echo ""
+
 # 总结
+TOTAL=11
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${BLUE}📊 检查结果总结${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -164,7 +267,7 @@ echo ""
 
 # 评分
 TOTAL=10
-SCORE=$(( (PASS * 100) / TOTAL ))
+SCORE=$(( (PASS * 100 + TOTAL / 2) / TOTAL ))
 
 echo -e "${BLUE}总体评分: $SCORE/100${NC}"
 echo ""

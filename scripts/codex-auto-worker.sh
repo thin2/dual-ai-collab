@@ -69,6 +69,7 @@ find_next_task() {
 
     # 在 awk 内完成优先级选择，直接输出单个完整任务块
     awk '
+        BEGIN { task_count = 0 }
         /## 任务 #[0-9]+:/ {
             if (in_task && task_content ~ /状态.*: OPEN/) {
                 # 保存当前任务
