@@ -1,5 +1,33 @@
 # Dual AI Collaboration Skill - 更新日志
 
+## [2.0.0] - 2026-03-10
+
+### 重大变更：自包含化
+
+**本版本将 Skill 重构为完全自包含**，用户只需复制一个 `.md` 文件即可开箱即用，无需安装任何外部脚本。
+
+### 新增功能
+- ✅ **自动环境初始化**：Skill 触发时自动创建 `planning/`、`.dual-ai-collab/logs/` 等目录
+- ✅ **内联 Worker 逻辑**：任务领取、状态更新、Codex 调用全部内联到 Skill 中
+- ✅ **内联审计流程**：Claude 直接读取代码审计，生成审计报告到 `planning/audit-reports/`
+- ✅ **内联监控命令**：任务统计、日志查看等命令直接通过 Bash 工具执行
+- ✅ **多种安装方式**：支持 git clone、curl 下载、手动复制
+
+### 改进
+- 🔧 移除对 `scripts/start-codex.sh`、`scripts/codex-auto-worker.sh` 的依赖
+- 🔧 移除对 `templates/codex-tasks.md`、`.dual-ai-collab.yml` 的依赖
+- 🔧 任务领取使用经过测试验证的 awk 逻辑（含 `BEGIN { task_count = 0 }` 初始化）
+- 🔧 简化文档结构，聚焦核心流程
+- 🔧 统一使用 `**状态**:` 格式匹配
+
+### 向后兼容性
+- ✅ 所有触发词和魔法词保持不变
+- ✅ 任务板格式保持不变
+- ✅ 需求规范文档格式保持不变
+- ✅ 外部脚本仍可独立使用（但不再是必需的）
+
+---
+
 ## [1.1.0] - 2026-03-09
 
 ### 新增功能
