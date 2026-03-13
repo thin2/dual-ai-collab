@@ -58,7 +58,7 @@ command -v codex && echo "CODEX_OK" || echo "CODEX_MISSING"
 ```
 
 - 如果 `CODEX_OK`：继续流程
-- 如果 `CODEX_MISSING`：提示用户安装 Codex CLI（`npm install -g @openai/codex-cli`），但仍可继续访谈和文档生成
+- 如果 `CODEX_MISSING`：提示用户安装 Codex CLI（`npm install -g @openai/codex`），但仍可继续访谈和文档生成
 
 **不需要任何外部脚本或配置文件。**
 
@@ -339,7 +339,7 @@ P3: [列出任务]
 
 ```bash
 # 检查 Codex CLI
-command -v codex || { echo "ERROR: codex 未安装，请运行 npm install -g @openai/codex-cli"; exit 1; }
+command -v codex || { echo "ERROR: codex 未安装，请运行 npm install -g @openai/codex"; exit 1; }
 
 # 检查任务板
 [ -f planning/codex-tasks.md ] || { echo "ERROR: 任务板不存在"; exit 1; }
@@ -414,7 +414,7 @@ sed -i '/## 任务 #XXX:/,/^---$/ s/\*\*状态\*\*: IN_PROGRESS/\*\*状态\*\*: 
 使用 Bash 工具调用 Codex 执行任务：
 
 ```bash
-codex --cwd "$(pwd)" "你是一个专业的开发工程师，正在执行以下任务：
+codex exec -C "$(pwd)" --full-auto "你是一个专业的开发工程师，正在执行以下任务：
 
 [任务内容]
 
@@ -501,11 +501,11 @@ done
 
 ```bash
 # Worker 1：在后台执行分配给它的任务
-codex --cwd "$(pwd)" "执行任务 #001：[任务描述]" &
+codex exec -C "$(pwd)" --full-auto "执行任务 #001：[任务描述]" &
 WORKER1_PID=$!
 
 # Worker 2：在后台执行另一个独立任务
-codex --cwd "$(pwd)" "执行任务 #003：[任务描述]" &
+codex exec -C "$(pwd)" --full-auto "执行任务 #003：[任务描述]" &
 WORKER2_PID=$!
 
 # 等待所有 Worker 完成
@@ -641,7 +641,7 @@ tail -n 50 .dual-ai-collab/logs/worker.log 2>/dev/null || echo "暂无日志"
 
 **问题 1：Codex CLI 未安装**
 ```bash
-npm install -g @openai/codex-cli
+npm install -g @openai/codex
 ```
 
 **问题 2：任务一直处于 IN_PROGRESS**
