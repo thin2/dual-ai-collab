@@ -58,7 +58,7 @@ command -v codex && echo "CODEX_OK" || echo "CODEX_MISSING"
 ```
 
 - 如果 `CODEX_OK`：继续流程
-- 如果 `CODEX_MISSING`：提示用户安装 Codex CLI（`npm install -g @openai/codex`），但仍可继续访谈和文档生成
+- 如果 `CODEX_MISSING`：提示用户安装 Codex CLI（`npm install -g @openai/codex-cli-cli`），但仍可继续访谈和文档生成
 
 **不需要任何外部脚本或配置文件。**
 
@@ -339,7 +339,7 @@ P3: [列出任务]
 
 ```bash
 # 检查 Codex CLI
-command -v codex || { echo "ERROR: codex 未安装，请运行 npm install -g @openai/codex"; exit 1; }
+command -v codex || { echo "ERROR: codex 未安装，请运行 npm install -g @openai/codex-cli-cli"; exit 1; }
 
 # 检查任务板
 [ -f planning/codex-tasks.md ] || { echo "ERROR: 任务板不存在"; exit 1; }
@@ -713,7 +713,7 @@ tail -n 50 .dual-ai-collab/logs/worker.log 2>/dev/null || echo "暂无日志"
 
 **问题 1：Codex CLI 未安装**
 ```bash
-npm install -g @openai/codex
+npm install -g @openai/codex-cli
 ```
 
 **问题 2：任务一直处于 IN_PROGRESS**

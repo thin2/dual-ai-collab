@@ -33,7 +33,7 @@ cp dual-ai-collab.md ~/.claude/skills/
 
 ## 详细文档
 
-- [安装指南](INSTALL.md)
+- [安装指南](../INSTALL-GUIDE.md)
 - [项目主页](../README.md)
 
 ## 工作流程
@@ -65,4 +65,4 @@ Claude：好的！我会帮你启动双 AI 协作开发流程。
 [开始访谈...]
 ```
 
-详见 [INSTALL.md](INSTALL.md)
+详见 [INSTALL-GUIDE.md](../INSTALL-GUIDE.md)

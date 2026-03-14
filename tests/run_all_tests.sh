@@ -41,13 +41,18 @@ run_test_suite() {
     local passed=$(echo "$output" | grep -c "✅" || true)
     local failed=$(echo "$output" | grep -c "❌" || true)
 
+    # 如果脚本异常退出（exit_code != 0），强制记为失败
+    if [ $exit_code -ne 0 ]; then
+        echo -e "${RED}⚠️  测试套件异常退出（exit code: $exit_code）${NC}"
+        failed=$((failed + 1))
+        FAILED_SUITES="$FAILED_SUITES\n  - $test_name (异常退出: exit code $exit_code)"
+    elif [ $failed -gt 0 ]; then
+        FAILED_SUITES="$FAILED_SUITES\n  - $test_name ($failed 个失败)"
+    fi
+
     TOTAL_PASS=$((TOTAL_PASS + passed))
     TOTAL_FAIL=$((TOTAL_FAIL + failed))
     TOTAL_RUN=$((TOTAL_RUN + passed + failed))
-
-    if [ $failed -gt 0 ]; then
-        FAILED_SUITES="$FAILED_SUITES\n  - $test_name ($failed 个失败)"
-    fi
 
     echo ""
 }

@@ -14,14 +14,14 @@ check_deps() {
     if [ -z "$deps" ] || [ "$deps" = "无" ] || [ "$deps" = "-" ]; then
         return 0
     fi
-    # 提取依赖任务编号，检查是否均为 VERIFIED
+    # 提取依赖任务编号，检查是否均为 DONE 或 VERIFIED
     for dep in $(echo "$deps" | grep -oP '#\d+' | sed 's/#//'); do
         local dep_status
         dep_status=$(awk -v id="$dep" '
             $0 ~ "## 任务 #0*" id ":" { found=1 }
             found && /\*\*状态\*\*:/ { gsub(/.*\*\*状态\*\*: */, ""); gsub(/ *$/, ""); print; exit }
         ' "$task_file")
-        if [ "$dep_status" != "VERIFIED" ]; then
+        if [ "$dep_status" != "DONE" ] && [ "$dep_status" != "VERIFIED" ]; then
             return 1
         fi
     done

@@ -145,18 +145,28 @@ describe() {
 it() {
     CURRENT_TEST="$1"
     TESTS_RUN=$((TESTS_RUN + 1))
+    TEST_HAS_PASSED=false
+    TEST_HAS_FAILED=false
 }
 
 pass() {
-    TESTS_PASSED=$((TESTS_PASSED + 1))
-    echo -e "  ${GREEN}✅ $CURRENT_TEST${NC}"
+    # 只在第一次 pass 时累加（避免一个 it 多个断言导致统计失真）
+    if [ "$TEST_HAS_PASSED" = false ] && [ "$TEST_HAS_FAILED" = false ]; then
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+        TEST_HAS_PASSED=true
+        echo -e "  ${GREEN}✅ $CURRENT_TEST${NC}"
+    fi
 }
 
 fail() {
-    TESTS_FAILED=$((TESTS_FAILED + 1))
-    echo -e "  ${RED}❌ $CURRENT_TEST${NC}"
-    if [ -n "${1:-}" ]; then
-        echo -e "     ${RED}原因: $1${NC}"
+    # 只在第一次 fail 时累加
+    if [ "$TEST_HAS_FAILED" = false ]; then
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        TEST_HAS_FAILED=true
+        echo -e "  ${RED}❌ $CURRENT_TEST${NC}"
+        if [ -n "${1:-}" ]; then
+            echo -e "     ${RED}原因: $1${NC}"
+        fi
     fi
 }
 

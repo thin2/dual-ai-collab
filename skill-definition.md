@@ -96,26 +96,34 @@ Skill 内部使用 Claude Code 内置工具，无需外部依赖：
     v
 [第 4 步] Claude 拆分任务写入任务板（Write）
     |      输出：planning/codex-tasks.md
-    |      每个任务包含：描述、优先级、验收标准
+    |      每个任务包含：描述、优先级、验收标准、依赖任务
     |
     v
-[第 5 步] 用户确认（AskUserQuestion）
-    |      展示任务概览，询问是否继续
+[第 5 步] 展示摘要并自动启动开发
+    |      展示任务概览、总工时预估
+    |      自动启动 Codex 开发，无需用户确认
     |
     v
 [第 6 步] Codex 执行开发
-    |      读取任务板 -> 选取最高优先级 OPEN 任务
+    |      读取任务板 -> 选取最高优先级 OPEN 任务（检查依赖）
     |      实现代码 -> 更新状态为 IN_PROGRESS -> DONE
+    |      自动循环到下一个任务
     |
     v
-[第 7 步] Claude 审计代码
-    |      读取 DONE 任务对应的代码文件
-    |      逐项检查验收标准
-    |      评分并更新状态为 VERIFIED 或 REJECTED
+[第 7 步] 双重审计（Codex + Claude）
+    |      Codex 先审查 -> 输出评分和问题清单
+    |      Claude 终审 -> 结合 Codex 结果做最终判定
+    |      VERIFIED（通过）或 REJECTED（不通过）
+    |
+    v
+[第 8 步] 自动修复循环（REJECTED 任务）
+    |      Codex 根据审计意见自动修复
+    |      修复后重新进入审计流程
+    |      最多修复 3 轮，超过则标记 FAILED
     |
     v
 [验收通过] 所有任务 VERIFIED -> 项目完成
-[验收失败] REJECTED 任务 -> 返回第 6 步修复 -> 再次审计
+[验收失败] 超过修复上限 -> 标记 FAILED -> 通知用户人工介入
 ```
 
 ---
@@ -129,7 +137,7 @@ dual-ai-collab/
 ├── skill/
 │   ├── dual-ai-collab.md       # 核心 Skill 文件（安装到 ~/.claude/skills/）
 │   └── CHANGELOG.md            # 版本更新日志
-├── tests/                      # 测试套件（65 个测试用例）
+├── tests/                      # 测试套件（64 个测试用例，7 个测试套件）
 │   └── run_all_tests.sh
 └── planning/                   # 运行时生成（不提交到版本库）
     ├── codex-tasks.md          # 任务板（Codex 的工作队列）
