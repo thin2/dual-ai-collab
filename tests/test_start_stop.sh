@@ -17,13 +17,13 @@ describe "Skill 文件验证和环境初始化测试"
 it "skill/dual-ai-collab.md 应存在"
 assert_file_exists "$PROJECT_DIR/skill/dual-ai-collab.md"
 
-# --- 测试 2：Skill 文件包含版本信息 ---
-it "Skill 文件应包含版本信息"
-result=$(grep -c "version:" "$PROJECT_DIR/skill/dual-ai-collab.md" || true)
+# --- 测试 2：Skill 文件包含 description ---
+it "Skill 文件应包含 description 字段"
+result=$(grep -c "description:" "$PROJECT_DIR/skill/dual-ai-collab.md" || true)
 if [ "$result" -ge 1 ]; then
     pass
 else
-    fail "未找到版本信息"
+    fail "未找到 description 字段"
 fi
 
 # --- 测试 3：Skill 文件包含触发词 ---
@@ -100,9 +100,13 @@ it "Skill 文件应包含任务板格式定义"
 result=$(cat "$PROJECT_DIR/skill/dual-ai-collab.md")
 assert_contains "$result" "任务 #"
 
-# --- 测试 10：CHANGELOG 文件存在 ---
-it "skill/CHANGELOG.md 应存在"
-assert_file_exists "$PROJECT_DIR/skill/CHANGELOG.md"
+# --- 测试 10：references 目录存在 ---
+it "skill/references/ 目录应存在"
+if [ -d "$PROJECT_DIR/skill/references" ]; then
+    pass
+else
+    fail "references 目录不存在"
+fi
 
 # --- 测试 11：不应存在已废弃的脚本文件 ---
 it "不应存在已废弃的 scripts 目录"

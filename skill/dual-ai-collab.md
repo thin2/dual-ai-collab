@@ -1,31 +1,6 @@
 ---
 name: dual-ai-collab
-version: 2.3.0
-description: 双 AI 协作开发模式 - Claude 深入访谈 + 规范生成 + Codex 全自动开发（开箱即用，支持并行执行和依赖管理）
-author: Claude + User
-category: workflow
-
-triggers:
-  keywords:
-    - "双 AI 协作"
-    - "dual ai"
-    - "codex 协作"
-    - "自动开发"
-    - "访谈开发"
-    - "审计代码"
-    - "审查任务"
-
-  magic_words:
-    - "🤖 启动双 AI"
-    - "🚀 开始协作"
-    - "💬 深入访谈"
-    - "🔍 审计代码"
-
-aliases:
-  - dual-collab
-  - ai-pair
-  - codex-claude
-
+description: 双 AI 协作开发模式 - Claude 深入访谈 + 规范生成 + Codex 全自动开发，支持 checkpoint 恢复、异步执行、双重审计和自动修复
 ---
 
 # Dual AI Collaboration Skill v2.3（自包含版）
@@ -159,7 +134,7 @@ bash skill/scripts/select_next_task.sh
 📊 总任务数：X 个 | ⏱️ 预计总工时：X 小时
 ```
 
-使用 **AskUserQuestion** 工具询问：
+使用 **AskUserQuestion** 工具询问用户：
 1. 是否开始自动开发（开始开发 / 修改规划 / 取消）
 2. 是否授予项目目录最高权限（自动创建 `.claude/settings.local.json`）
 
@@ -309,14 +284,13 @@ bash skill/scripts/summarize_progress.sh
 
 1. **本 Skill 完全自包含**：只需 `cp dual-ai-collab.md ~/.claude/skills/` 即可使用
 2. **访谈必须深入**：不要问显而易见的问题，持续 5-10 轮直到需求明确
-3. **使用 AskUserQuestion**：必须使用这个工具进行访谈
-4. **任务拆分合理**：每个任务 1-3 小时，独立可测
-5. **规划后等待用户审查**：任务板生成后必须等用户确认才能启动开发
-6. **Checkpoint 持久化**：每次阶段转换必须更新 `.dual-ai-collab/checkpoints/state.json`
-7. **Codex 后台执行**：使用 `run_in_background: true` 启动 Codex，避免阻塞 Claude
-8. **对话压缩后自动恢复**：触发 Skill 时先检查 checkpoint，有则恢复，无则从头开始
-9. **安全第一**：不要在文档中记录敏感信息（API 密钥、密码、Token）
-10. **审计严格**：按评分标准客观评价，REJECTED 的任务需说明具体原因
+3. **任务拆分合理**：每个任务 1-3 小时，独立可测
+4. **规划后等待用户审查**：任务板生成后必须等用户确认才能启动开发
+5. **Checkpoint 持久化**：每次阶段转换必须更新 checkpoint
+6. **Codex 后台执行**：后台启动 Codex，避免阻塞主流程
+7. **对话压缩后自动恢复**：触发 Skill 时先检查 checkpoint，有则恢复
+8. **安全第一**：不要在文档中记录敏感信息
+9. **审计严格**：按评分标准客观评价，REJECTED 需说明具体原因
 
 ---
 
