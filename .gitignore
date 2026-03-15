@@ -3,9 +3,6 @@ node_modules/
 venv/
 __pycache__/
 *.pyc
-*.pyo
-*.pyd
-.Python
 
 # IDE
 .vscode/
@@ -13,26 +10,17 @@ __pycache__/
 *.swp
 *.swo
 *~
+
+# OS
 .DS_Store
-
-# Build outputs
-dist/
-build/
-*.egg-info/
-
-# Environment
-.env
-.env.local
+Thumbs.db
 
 # Logs
 *.log
 logs/
 
-# OS
-Thumbs.db
-.DS_Store
-
-# Project specific
-planning/progress/*.md
-!planning/progress/.gitkeep
+# Runtime (运行时生成，不提交)
+planning/
+.dual-ai-collab/
 .omc/
+.claude/
