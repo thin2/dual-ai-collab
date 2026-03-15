@@ -1,7 +1,7 @@
 # Dual AI Collaboration - 架构设计文档
 
-**版本**: 2.1.0
-**最后更新**: 2026-03-10
+**版本**: 2.3.0
+**最后更新**: 2026-03-15
 **状态**: 正式发布
 
 ---
@@ -82,6 +82,12 @@ Skill 内部使用 Claude Code 内置工具，无需外部依赖：
 用户需求
     |
     v
+[第 0 步] 初始化 & 恢复检查
+    |      检查 .dual-ai-collab/checkpoints/state.json
+    |      有 checkpoint → 跳转到中断阶段继续执行
+    |      无 checkpoint → 从第 1 步开始
+    |
+    v
 [第 1 步] Claude 初始询问（AskUserQuestion）
     |      了解用户想开发什么功能
     |
@@ -92,38 +98,43 @@ Skill 内部使用 Claude Code 内置工具，无需外部依赖：
     v
 [第 3 步] Claude 生成需求规范（Write）
     |      输出：planning/specs/YYYYMMDD-HHMMSS-[功能名].md
+    |      ✏️ 写入 checkpoint: phase="spec_generated"
     |
     v
 [第 4 步] Claude 拆分任务写入任务板（Write）
     |      输出：planning/codex-tasks.md
     |      每个任务包含：描述、优先级、验收标准、依赖任务
+    |      ✏️ 写入 checkpoint: phase="tasks_created"
     |
     v
 [第 5 步] 展示摘要并等待用户审查
     |      展示任务概览、总工时预估
     |      使用 AskUserQuestion 询问用户是否继续
     |      用户可选择：开始开发 / 修改规划 / 取消
+    |      ✏️ 用户确认后写入 checkpoint: phase="user_approved"
     |
     v
-[第 6 步] Codex 执行开发
-    |      读取任务板 -> 选取最高优先级 OPEN 任务（检查依赖）
-    |      实现代码 -> 更新状态为 IN_PROGRESS -> DONE
-    |      自动循环到下一个任务
+[第 6 步] Codex 异步执行开发
+    |      后台启动 Codex（run_in_background + timeout 300s）
+    |      Claude 轮询检查完成状态，不阻塞等待
+    |      ✏️ 每个任务开始/完成时更新 checkpoint
     |
     v
 [第 7 步] 双重审计（Codex + Claude）
     |      Codex 先审查 -> 输出评分和问题清单
     |      Claude 终审 -> 结合 Codex 结果做最终判定
     |      VERIFIED（通过）或 REJECTED（不通过）
+    |      ✏️ 写入 checkpoint: phase="auditing"
     |
     v
 [第 8 步] 自动修复循环（REJECTED 任务）
     |      Codex 根据审计意见自动修复
     |      修复后重新进入审计流程
     |      最多修复 3 轮，超过则标记 FAILED
+    |      ✏️ 写入 checkpoint: phase="fixing", fix_round=N
     |
     v
-[验收通过] 所有任务 VERIFIED -> 项目完成
+[验收通过] 所有任务 VERIFIED -> 删除 checkpoint -> 项目完成
 [验收失败] 超过修复上限 -> 标记 FAILED -> 通知用户人工介入
 ```
 
@@ -131,7 +142,7 @@ Skill 内部使用 Claude Code 内置工具，无需外部依赖：
 
 ## 目录结构
 
-v2.1.0 自包含版，克隆仓库即可使用：
+v2.3.0 自包含版，克隆仓库即可使用：
 
 ```
 dual-ai-collab/
@@ -140,10 +151,15 @@ dual-ai-collab/
 │   └── CHANGELOG.md            # 版本更新日志
 ├── tests/                      # 测试套件（64 个测试用例，7 个测试套件）
 │   └── run_all_tests.sh
-└── planning/                   # 运行时生成（不提交到版本库）
-    ├── codex-tasks.md          # 任务板（Codex 的工作队列）
-    └── specs/                  # 需求规范文档
-        └── YYYYMMDD-HHMMSS-[功能名].md
+├── planning/                   # 运行时生成（不提交到版本库）
+│   ├── codex-tasks.md          # 任务板（Codex 的工作队列）
+│   ├── audit-reports/          # 审计报告
+│   └── specs/                  # 需求规范文档
+└── .dual-ai-collab/            # 运行时状态（不提交到版本库）
+    ├── checkpoints/
+    │   └── state.json          # 流程状态 checkpoint（支持对话压缩后恢复）
+    └── logs/
+        └── task-XXX.log        # Codex 执行日志
 ```
 
 **说明**

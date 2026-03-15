@@ -1,6 +1,6 @@
 ---
 name: dual-ai-collab
-version: 2.2.0
+version: 2.3.0
 description: 双 AI 协作开发模式 - Claude 深入访谈 + 规范生成 + Codex 全自动开发（开箱即用，支持并行执行和依赖管理）
 author: Claude + User
 category: workflow
@@ -28,39 +28,78 @@ aliases:
 
 ---
 
-# Dual AI Collaboration Skill v2.1（自包含版）
+# Dual AI Collaboration Skill v2.3（自包含版）
+
+> **目标运行环境**：本 Skill 专为 **Claude Code** 设计，依赖 Claude Code 的内置工具（Bash、Read、Write、Edit、AskUserQuestion）。Codex CLI 作为外部开发执行器被调用，但 Skill 本身的流程控制由 Claude 驱动。
 
 你是 Claude，一个专业的软件架构师和项目经理。
 
 当用户触发这个 skill 时，你需要启动**双 AI 协作开发流程**。
 
-> **本 Skill 完全自包含**：只需将此文件复制到 `~/.claude/skills/`，无需安装任何外部脚本即可使用。
-
 ---
 
-## 第 0 步：自动初始化环境
+## 第 0 步：自动初始化 & 恢复检查
 
-**每次触发 Skill 时，首先检查并初始化工作环境。**
-
-使用 Bash 工具执行以下初始化：
+**每次触发 Skill 时，首先检查是否有中断的流程需要恢复。**
 
 ```bash
-# 自动创建必要的目录结构
-mkdir -p planning/specs
-mkdir -p .dual-ai-collab/logs
-mkdir -p .dual-ai-collab/checkpoints
+bash skill/scripts/init_env.sh
 ```
 
-然后检查 Codex CLI 是否可用：
+然后**立即检查是否有中断的流程**：
+
+```bash
+bash skill/scripts/check_checkpoint.sh
+```
+
+**如果发现 checkpoint（`CHECKPOINT_FOUND`）**：
+- 读取 `state.json` 中的 `phase` 字段，确定中断在哪个阶段
+- **直接跳转到对应阶段继续执行**，不要重新访谈或重新生成文档
+- 恢复逻辑见下方「恢复执行规则」
+
+**如果没有 checkpoint（`NO_CHECKPOINT`）**：
+- 检查 Codex CLI 是否可用，然后从第 1 步开始
 
 ```bash
 command -v codex && echo "CODEX_OK" || echo "CODEX_MISSING"
 ```
 
-- 如果 `CODEX_OK`：继续流程
-- 如果 `CODEX_MISSING`：提示用户安装 Codex CLI（`npm install -g @openai/codex-cli-cli`），但仍可继续访谈和文档生成
+- 如果 `CODEX_MISSING`：提示用户安装（`npm install -g @openai/codex-cli`），但仍可继续访谈和文档生成
 
-**不需要任何外部脚本或配置文件。**
+### 恢复执行规则
+
+根据 `state.json` 中的 `phase` 值跳转：
+
+| phase 值 | 恢复动作 |
+|-----------|----------|
+| `interview` | 读取已收集信息，继续未完成的访谈 |
+| `spec_generated` | 跳到第 4 步（拆分任务） |
+| `tasks_created` | 跳到第 5 步（等待用户审查） |
+| `user_approved` | 跳到第 6 步（启动开发） |
+| `developing` | 读取任务板，找到 OPEN/IN_PROGRESS 任务继续执行 |
+| `auditing` | 读取任务板，对 DONE 任务继续审计 |
+| `fixing` | 读取任务板，对 REJECTED 任务继续修复 |
+
+**恢复时必须向用户报告**：
+```
+🔄 检测到中断的流程，正在恢复...
+📍 中断阶段：[phase]
+📋 任务板：planning/codex-tasks.md
+⏩ 继续执行...
+```
+
+### Checkpoint 状态文件
+
+文件路径：`.dual-ai-collab/checkpoints/state.json`，字段：`phase`、`spec_file`、`task_file`、`current_task`、`total_tasks`、`completed_tasks`、`fix_round`、`updated_at`。
+
+**写入时机**（每次阶段转换时必须更新）：
+- 访谈完成 → `phase: "spec_generated"`
+- 任务板创建完成 → `phase: "tasks_created"`
+- 用户确认开始开发 → `phase: "user_approved"`
+- 开始执行任务 → `phase: "developing"`，更新 `current_task`
+- 进入审计 → `phase: "auditing"`
+- 进入修复 → `phase: "fixing"`，更新 `fix_round`
+- 全部完成 → 删除 state.json
 
 ---
 
@@ -68,76 +107,18 @@ command -v codex && echo "CODEX_OK" || echo "CODEX_MISSING"
 
 ### 第 1 步：询问需求
 
-使用 **AskUserQuestion** 工具询问用户想要开发什么功能：
-
-```
-问题：你想开发什么功能？
-
-请简要描述你的需求，例如：
-- 用户认证系统
-- 博客管理功能
-- 电商购物车
-- 数据分析仪表板
-- 等等...
-
-我会对你进行深入访谈，然后生成详细的需求规范和任务板。
-```
+使用 **AskUserQuestion** 工具询问用户想要开发什么功能，请用户简要描述需求（如：用户认证系统、博客管理、电商购物车等）。
 
 ### 第 2 步：深入访谈
 
-根据用户的需求，进行 **5-10 轮深入访谈**，使用 **AskUserQuestion** 工具。
+根据用户需求，进行 **5-10 轮深入访谈**，使用 **AskUserQuestion** 工具。
 
-#### 访谈维度（必须涵盖）
+> 📖 详细访谈维度、访谈原则和问题示例见 `references/interview.md`
 
-1. **功能范围和目标**
-   - 核心目标是什么？
-   - 目标用户是谁？
-   - 必须实现的功能？
-   - 可选的功能？
-
-2. **技术实现**
-   - 技术栈偏好？
-   - 技术限制或要求？
-   - 需要集成的第三方服务？
-   - 性能要求？
-
-3. **用户界面与体验**
-   - 用户如何交互？
-   - 界面风格偏好？
-   - 响应式设计要求？
-
-4. **数据和安全**
-   - 需要存储什么数据？
-   - 数据安全要求？
-   - 隐私保护要求？
-
-5. **边界情况**
-   - 如何处理错误？
-   - 如何处理并发？
-   - 如何处理大量数据？
-
-6. **权衡取舍**
-   - 速度 vs 功能完整性？
-   - 简单 vs 灵活？
-   - 开发时间 vs 质量？
-
-7. **集成和依赖**
-   - 与现有系统如何集成？
-   - API 设计要求？
-
-8. **测试和验收**
-   - 如何验证功能正确？
-   - 验收标准是什么？
-
-#### 访谈原则
-
-- ✅ **非显而易见**：不问"需要数据库吗"这种显而易见的问题
-- ✅ **深入细节**：问"如何处理并发登录冲突"而不是"需要并发吗"
-- ✅ **权衡取舍**：问"速度和安全性如何权衡"
-- ✅ **边界情况**：问"如何处理 1000 次/秒的请求"
-- ✅ **用户体验**：问"用户如何发现错误"而不是"需要提示吗"
-
-**持续访谈直到**：所有关键维度都已覆盖，用户回答足够详细，没有明显遗漏。
+核心原则：
+- 不问显而易见的问题，聚焦非显而易见的细节
+- 涵盖：功能范围、技术实现、UI/UX、数据安全、边界情况、权衡取舍、集成依赖、测试验收
+- 持续访谈直到所有关键维度都已覆盖
 
 ### 第 3 步：生成需求规范文档
 
@@ -145,53 +126,7 @@ command -v codex && echo "CODEX_OK" || echo "CODEX_MISSING"
 
 **文件路径**：`planning/specs/YYYYMMDD-HHMMSS-[功能名称].md`
 
-**文档结构**：
-
-```markdown
-# 需求规范：[功能名称]
-
-**创建时间**: YYYY-MM-DD HH:MM:SS
-**访谈人员**: Claude
-**需求提出者**: [用户名]
-**项目路径**: [项目路径]
-
----
-
-## 1. 概述
-### 1.1 功能目标
-### 1.2 目标用户
-### 1.3 成功标准
-
-## 2. 功能需求
-### 2.1 核心功能（必须实现）
-### 2.2 扩展功能（可选）
-
-## 3. 技术规范
-### 3.1 技术栈
-### 3.2 架构设计
-### 3.3 API 设计
-### 3.4 数据模型
-
-## 4. 用户界面设计
-### 4.1 界面布局
-### 4.2 交互流程
-
-## 5. 非功能需求
-### 5.1 性能要求
-### 5.2 安全要求
-
-## 6. 边界情况处理
-
-## 7. 测试和验收
-### 7.1 测试策略
-### 7.2 验收标准
-
-## 8. 实施计划
-### 8.1 任务拆分（见任务板）
-### 8.2 时间估算
-
-## 9. 风险和依赖
-```
+> 📖 文档结构模板（概述、功能需求、技术规范、UI 设计、非功能需求、边界情况、测试验收、实施计划、风险依赖）见 `references/interview.md`
 
 每个功能条目必须包含：描述、优先级、预计工时、验收标准。
 
@@ -199,111 +134,19 @@ command -v codex && echo "CODEX_OK" || echo "CODEX_MISSING"
 
 根据需求规范，将功能拆分为具体的开发任务。
 
-**任务拆分原则**：
-- 每个任务 1-3 小时完成
-- 任务之间尽量独立
-- 优先级明确（P1 > P2 > P3）
-- 验收标准清晰
+**任务拆分原则**：每个任务 1-3 小时完成，任务间尽量独立，优先级明确（P1 > P2 > P3），验收标准清晰。
 
-使用 **Write** 工具写入任务板。
+使用 **Write** 工具写入任务板，文件路径：`planning/codex-tasks.md`
 
-**文件路径**：`planning/codex-tasks.md`
+> 📖 任务板格式模板、字段说明和依赖检查逻辑见 `references/task-board.md`
 
-**任务格式**：
-
-```markdown
-# Codex 任务板 - [功能名称]
-
-**创建时间**: YYYY-MM-DD HH:MM:SS
-**规范文档**: planning/specs/YYYYMMDD-HHMMSS-[功能名称].md
-**总任务数**: X
-**预计总工时**: X 小时
-
----
-
-## 任务 #001: [任务标题]
-
-**优先级**: P1
-**状态**: OPEN
-**分配给**: Codex
-**创建时间**: YYYY-MM-DD
-**预计工时**: X 小时
-**依赖任务**: 无
-**完成时间**: -
-**审计评分**: -
-**审计意见**: -
-
-### 任务描述
-[详细描述任务内容]
-
-### 技术要求
-- [技术要求 1]
-- [技术要求 2]
-
-### 验收标准
-- [ ] [验收标准 1]
-- [ ] [验收标准 2]
-
-### 相关文件
-- `path/to/file1.py`
-
----
-
-## 任务 #002: [任务标题]
-[同上格式]
-
----
-```
-
-#### 依赖任务字段说明
-
-`**依赖任务**` 字段用于声明当前任务必须在哪些任务完成后才能开始执行。
-
-**格式**：
-- `**依赖任务**: 无` — 无依赖，可随时执行（也可并行执行）
-- `**依赖任务**: #001` — 依赖单个任务
-- `**依赖任务**: #001, #002` — 依赖多个任务，所有列出的任务都必须完成
-
-**任务领取时的依赖检查**：在领取任务前，使用以下 awk 逻辑验证依赖任务是否已完成（状态为 DONE 或 VERIFIED）：
+领取任务前检查依赖是否满足：
 
 ```bash
-# 检查任务 #XXX 的依赖是否全部完成
-check_deps() {
-    local task_num=$1
-    # 提取依赖列表
-    DEPS=$(awk "/## 任务 #${task_num}:/,/^---$/" planning/codex-tasks.md \
-        | awk '/\*\*依赖任务\*\*:/ { gsub(/.*依赖任务\*\*: /, ""); gsub(/#/, ""); print }')
-
-    if [ "$DEPS" = "无" ] || [ -z "$DEPS" ]; then
-        echo "NO_DEPS"
-        return 0
-    fi
-
-    # 逐一检查每个依赖任务的状态
-    ALL_DONE=true
-    for DEP in $(echo "$DEPS" | tr ',' ' '); do
-        DEP=$(echo "$DEP" | tr -d ' ')
-        STATUS=$(awk "/## 任务 #${DEP}:/,/^---$/" planning/codex-tasks.md \
-            | awk '/\*\*状态\*\*:/ { gsub(/.*状态\*\*: /, ""); print; exit }')
-        if [ "$STATUS" != "DONE" ] && [ "$STATUS" != "VERIFIED" ]; then
-            echo "BLOCKED: 依赖任务 #${DEP} 状态为 ${STATUS}，尚未完成"
-            ALL_DONE=false
-        fi
-    done
-
-    $ALL_DONE && echo "DEPS_OK" || return 1
-}
-
-# 使用示例：领取任务前先检查
-RESULT=$(check_deps "003")
-if [ "$RESULT" = "DEPS_OK" ] || [ "$RESULT" = "NO_DEPS" ]; then
-    echo "可以执行任务 #003"
-else
-    echo "$RESULT，跳过该任务"
-fi
+bash skill/scripts/select_next_task.sh
 ```
 
-**执行原则**：如果依赖未完成，跳过该任务，继续寻找下一个可执行的 OPEN 任务，避免阻塞整个流程。
+**执行原则**：依赖未完成则跳过该任务，继续寻找下一个可执行的 OPEN 任务。
 
 ### 第 5 步：展示摘要并等待用户审查
 
@@ -311,567 +154,181 @@ fi
 
 ```
 ✅ 需求规范和任务板已创建完成！
-
 📄 需求规范文档：planning/specs/[文件名].md
 📋 任务板：planning/codex-tasks.md
-📊 总任务数：X 个
-⏱️  预计总工时：X 小时
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-📋 任务概览：
-P1: [列出任务]
-P2: [列出任务]
-P3: [列出任务]
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-⏸️  请审查以上规划文档，确认无误后再继续开发。
+📊 总任务数：X 个 | ⏱️ 预计总工时：X 小时
 ```
 
-**使用 AskUserQuestion 工具询问用户**：
+使用 **AskUserQuestion** 工具询问：
+1. 是否开始自动开发（开始开发 / 修改规划 / 取消）
+2. 是否授予项目目录最高权限（自动创建 `.claude/settings.local.json`）
 
-```typescript
-AskUserQuestion({
-  questions: [{
-    question: "规划文档已生成，是否开始自动开发？",
-    header: "开发确认",
-    options: [
-      { label: "开始开发", description: "启动 Codex 自动开发流程" },
-      { label: "修改规划", description: "我需要先修改规划文档" },
-      { label: "取消", description: "暂时不继续" }
-    ],
-    multiSelect: false
-  }]
-})
-```
+- 选择"开始开发" → 继续第 6 步
+- 选择"修改规划" → 等待用户修改后再次询问
+- 选择"取消" → 结束流程
+- 选择"授权" → 写入项目级权限配置后继续
 
-- 如果用户选择"开始开发"，继续第 6 步
-- 如果用户选择"修改规划"，等待用户修改完成后再次询问
-- 如果用户选择"取消"，结束流程
+### 第 6 步：启动开发（异步 Codex 执行）
 
-### 第 6 步：启动开发（内联 Codex 执行）
+**核心原则：Codex 在后台执行，Claude 不阻塞等待。**
 
-展示摘要后，使用 Bash 工具直接启动 Codex。
+#### 6.1 启动前检查 & 写入 checkpoint
 
-**不需要任何外部脚本。** Claude 直接管理整个流程。
+检查 Codex CLI 和任务板是否存在，写入 `phase: "developing"` checkpoint。
 
-#### 6.1 启动前检查
-
-使用 Bash 工具执行：
+#### 6.2 任务领取
 
 ```bash
-# 检查 Codex CLI
-command -v codex || { echo "ERROR: codex 未安装，请运行 npm install -g @openai/codex-cli-cli"; exit 1; }
-
-# 检查任务板
-[ -f planning/codex-tasks.md ] || { echo "ERROR: 任务板不存在"; exit 1; }
+bash skill/scripts/select_next_task.sh
 ```
 
-#### 6.2 任务领取（内联 awk 逻辑）
-
-使用 Bash 工具查找最高优先级的 OPEN 任务：
-
-```bash
-awk '
-    BEGIN { task_count = 0 }
-    /## 任务 #[0-9]+:/ {
-        if (in_task && task_content ~ /状态.*: OPEN/) {
-            tasks[task_count] = task_header "\n" task_content
-            priorities[task_count] = priority
-            task_count++
-        }
-        in_task = 1
-        task_header = $0
-        task_content = ""
-        priority = 9
-        next
-    }
-    in_task && /^---$/ {
-        if (task_content ~ /状态.*: OPEN/) {
-            tasks[task_count] = task_header "\n" task_content
-            priorities[task_count] = priority
-            task_count++
-        }
-        in_task = 0
-        task_content = ""
-        next
-    }
-    in_task {
-        task_content = task_content $0 "\n"
-        if ($0 ~ /优先级.*: P1/) { priority = 1 }
-        else if ($0 ~ /优先级.*: P2/) { priority = 2 }
-        else if ($0 ~ /优先级.*: P3/) { priority = 3 }
-    }
-    END {
-        if (task_count > 0) {
-            min_priority = 9; min_index = -1
-            for (i = 0; i < task_count; i++) {
-                if (priorities[i] < min_priority) {
-                    min_priority = priorities[i]; min_index = i
-                }
-            }
-            if (min_index >= 0) print tasks[min_index]
-        }
-    }
-' planning/codex-tasks.md
-```
+选择最高优先级、依赖已满足的 OPEN 任务。
 
 #### 6.3 更新任务状态
 
-使用 Bash 工具更新状态：
-
 ```bash
-# OPEN -> IN_PROGRESS
-sed -i '/## 任务 #XXX:/,/^---$/ s/\*\*状态\*\*: OPEN/\*\*状态\*\*: IN_PROGRESS/' planning/codex-tasks.md
-
-# IN_PROGRESS -> DONE（执行成功后）
-sed -i '/## 任务 #XXX:/,/^---$/ s/\*\*状态\*\*: IN_PROGRESS/\*\*状态\*\*: DONE/' planning/codex-tasks.md
-
-# IN_PROGRESS -> OPEN（执行失败后回退）
-sed -i '/## 任务 #XXX:/,/^---$/ s/\*\*状态\*\*: IN_PROGRESS/\*\*状态\*\*: OPEN/' planning/codex-tasks.md
+bash skill/scripts/update_task_status.sh XXX IN_PROGRESS
+# 执行成功后：
+bash skill/scripts/update_task_status.sh XXX DONE
+# 执行失败后回退：
+bash skill/scripts/update_task_status.sh XXX OPEN
 ```
 
-#### 6.4 执行任务
+#### 6.4 执行任务（智能路由）
 
-使用 Bash 工具调用 Codex 执行任务：
+**前端/UI 任务**（文件含 `.html/.css/.vue/.tsx` 或描述含页面/组件/样式等）：
+- Claude 调用 `ui-ux-pro-max` skill 获取设计方案，再用 Write/Edit 直接编写前端代码
+
+**后端/通用任务**：使用 `run_in_background: true` 后台启动 Codex：
 
 ```bash
-codex exec -C "$(pwd)" --full-auto "你是一个专业的开发工程师，正在执行以下任务：
-
-[任务内容]
-
-工作要求：
-1. 仔细阅读任务描述、技术要求和验收标准
-2. 编写高质量、可维护的代码
-3. 添加必要的注释
-4. 确保代码符合最佳实践
-5. 满足所有验收标准
-
-只编写代码，不要进行审计或测试。完成后直接保存文件。"
+TASK_NUM="XXX"
+LOG_FILE=".dual-ai-collab/logs/task-${TASK_NUM}.log"
+codex exec -C "$(pwd)" --full-auto "你是专业开发工程师，执行以下任务：[任务内容]
+要求：仔细阅读验收标准，编写高质量可维护代码，添加必要注释，满足所有验收标准。" \
+  > "$LOG_FILE" 2>&1 &
+echo $! > .dual-ai-collab/logs/task-${TASK_NUM}.pid
 ```
 
-#### 6.5 执行循环
+#### 6.5 活跃度检测
 
-对每个 OPEN 任务**自动循环**执行以下步骤：
-1. 领取最高优先级的 OPEN 任务（先检查依赖）
-2. 更新状态为 IN_PROGRESS
-3. 调用 Codex 执行
-4. 执行成功 → 更新为 DONE
-5. 执行失败 → 回退为 OPEN
-6. **自动继续下一个任务**（无需用户确认）
+```bash
+bash skill/scripts/detect_stall.sh XXX $CODEX_PID
+```
 
-每个任务完成后向用户报告进度，全部任务完成后自动进入审计流程。
+> 📖 检测逻辑（进程状态 + 文件变动 + 日志增长三重检测）见脚本注释
+
+判定规则：连续 3 次 STALLED（约 3 分钟）→ kill 进程，回退任务为 OPEN，跳到下一个任务。轮询间隔 60 秒。
+
+#### 6.6 执行循环
+
+对每个 OPEN 任务自动循环：领取任务 → 更新 IN_PROGRESS → 后台启动 Codex → 更新 checkpoint → 轮询活跃度 → 成功更新 DONE / 卡死回退 OPEN → 自动继续下一个任务。
+
+每个任务完成后报告进度：
+```
+✅ 任务 #XXX 完成 (3/8) | ⏱️ 耗时：2m30s | 📋 剩余：5 个 | ⏩ 继续执行 #YYY...
+```
+
+全部任务完成后更新 checkpoint 为 `auditing`，自动进入审计流程。
 
 ### 第 7 步：多 Worker 并行执行（可选）
 
-如果任务板中有多个互相独立的 OPEN 任务，可以同时启动多个 Codex 实例并行处理，显著缩短整体开发时间。
+对无依赖的 OPEN 任务，可同时启动多个 Codex 实例并行处理。
 
-**前提条件**：并行的任务之间不能有依赖关系（`**依赖任务**: 无`），否则必须按顺序执行。
-
-#### 7.1 识别可并行任务
-
-使用 Bash 工具查找所有无依赖的 OPEN 任务：
+**前提**：并行任务间无依赖关系（`**依赖任务**: 无`）且无文件写入冲突，建议并行数不超过 3 个。
 
 ```bash
-awk '
-    /## 任务 #[0-9]+:/ { task_id = $0; in_task = 1; has_dep = 0; is_open = 0 }
-    in_task && /\*\*状态\*\*: OPEN/ { is_open = 1 }
-    in_task && /\*\*依赖任务\*\*: 无/ { has_dep = 0 }
-    in_task && /\*\*依赖任务\*\*: #/ { has_dep = 1 }
-    in_task && /^---$/ {
-        if (is_open && !has_dep) print task_id
-        in_task = 0
-    }
-' planning/codex-tasks.md
+# 查找可并行任务
+bash skill/scripts/select_next_task.sh --parallel
+
+# 并行启动（每个任务独立后台进程）
+codex exec -C "$(pwd)" --full-auto "执行任务 #001：[描述]" > .dual-ai-collab/logs/task-001.log 2>&1 &
+codex exec -C "$(pwd)" --full-auto "执行任务 #003：[描述]" > .dual-ai-collab/logs/task-003.log 2>&1 &
+wait
 ```
 
-#### 7.2 分配任务给不同 Worker
-
-使用 Bash 工具按优先级将任务分配给 Worker 1、Worker 2 等并发执行：
-
-```bash
-# 获取所有可并行的 OPEN 任务（无依赖），按优先级排序
-PARALLEL_TASKS=$(awk '
-    /## 任务 #([0-9]+):/ {
-        match($0, /## 任务 #([0-9]+):/, arr)
-        task_num = arr[1]
-        in_task = 1; is_open = 0; has_dep = 0; priority = 9
-    }
-    in_task && /\*\*状态\*\*: OPEN/ { is_open = 1 }
-    in_task && /\*\*优先级\*\*: P([0-9])/ { match($0, /P([0-9])/, p); priority = p[1] }
-    in_task && /\*\*依赖任务\*\*: 无/ { has_dep = 0 }
-    in_task && /\*\*依赖任务\*\*: #/ { has_dep = 1 }
-    in_task && /^---$/ {
-        if (is_open && !has_dep) printf "%d %s\n", priority, task_num
-        in_task = 0
-    }
-' planning/codex-tasks.md | sort -n | awk '{print $2}')
-
-# 将任务分配给 Worker（示例：Worker1 处理奇数序号任务，Worker2 处理偶数序号任务）
-WORKER=1
-for TASK_NUM in $PARALLEL_TASKS; do
-    # 标记为 IN_PROGRESS，并记录分配的 Worker
-    sed -i "/## 任务 #${TASK_NUM}:/,/^---$/ s/\*\*状态\*\*: OPEN/\*\*状态\*\*: IN_PROGRESS/" planning/codex-tasks.md
-    echo "Worker ${WORKER} <- 任务 #${TASK_NUM}"
-    WORKER=$(( WORKER % 2 + 1 ))   # 在 Worker1 和 Worker2 之间交替
-done
-```
-
-#### 7.3 并行启动 Codex 实例
-
-在不同终端或后台进程中分别启动 Codex，处理各自分配的任务：
-
-```bash
-# Worker 1：在后台执行分配给它的任务
-codex exec -C "$(pwd)" --full-auto "执行任务 #001：[任务描述]" &
-WORKER1_PID=$!
-
-# Worker 2：在后台执行另一个独立任务
-codex exec -C "$(pwd)" --full-auto "执行任务 #003：[任务描述]" &
-WORKER2_PID=$!
-
-# 等待所有 Worker 完成
-wait $WORKER1_PID && echo "Worker1 完成" || echo "Worker1 失败"
-wait $WORKER2_PID && echo "Worker2 完成" || echo "Worker2 失败"
-```
-
-#### 7.4 注意事项
-
-- 并行任务之间**不能有文件写入冲突**（避免两个 Worker 同时修改同一个文件）
-- 如果某个任务执行失败，使用 sed 将其状态从 IN_PROGRESS 回退为 OPEN，不影响其他 Worker
-- 建议并行数量不超过 3 个，避免资源竞争和日志混乱
-- 所有并行任务完成后，统一进行审计
+某个任务失败时用 `update_task_status.sh` 回退为 OPEN，不影响其他 Worker。所有并行任务完成后统一进行审计。
 
 ---
 
 ## 审计流程（双 AI 审计 + 自动修复）
 
-当所有任务完成（DONE）或识别到审计触发词（"审计代码"、"审查任务"、"🔍 审计代码"）时，自动启动双重审计：
+当所有任务完成（DONE）或识别到审计触发词时，自动启动双重审计。
 
-### 第一轮：Codex 审计
+> 📖 详细审计步骤、Codex 审计提示词、Claude 审计步骤、报告格式和评分标准见 `references/audit.md`
 
-对每个 DONE 状态的任务，使用 Codex 进行代码审查：
+**第一轮：Codex 审计** — 对每个 DONE 任务检查功能符合性、代码质量、安全、性能、边界情况，输出评分和 PASS/FAIL 结论，保存到 `planning/audit-reports/`。
 
-```bash
-codex exec -C "$(pwd)" --full-auto "你是一个资深代码审查员，请审查以下任务的代码实现：
+**第二轮：Claude 审计** — 读取 Codex 审查结果 + 规范文档 + 代码，综合判定，更新任务板 Claude 审查状态（VERIFIED / REJECTED）。
 
-任务：[任务标题]
-相关文件：[文件列表]
-验收标准：[验收标准列表]
-
-请检查：
-1. 功能是否符合验收标准
-2. 代码质量（可读性、可维护性）
-3. 安全问题（注入、XSS、敏感信息泄露等）
-4. 性能问题（内存泄漏、N+1 查询等）
-5. 边界情况处理
-
-输出格式：
-- 评分（0-100）
-- 结论（PASS / FAIL）
-- 发现的问题（逐条列出）
-- 改进建议（逐条列出）"
-```
-
-将 Codex 审查结果保存到 `planning/audit-reports/YYYYMMDD-任务XXX-codex-review.md`。
-
-### 第二轮：Claude 审计
-
-Claude 读取 Codex 的审查结果，结合自己的代码审查，做出最终判定：
-
-### 审计步骤
-
-1. **读取任务板**：使用 Read 工具查看哪些任务已完成（DONE）
-2. **读取 Codex 审查结果**：使用 Read 工具读取 Codex 的审查报告
-3. **读取规范文档**：使用 Read 工具了解验收标准
-4. **检查代码**：使用 Read 工具读取相关代码文件
-   - 功能是否符合需求
-   - 代码质量是否达标
-   - 是否有安全问题
-   - 是否有性能问题
-5. **综合 Codex 和 Claude 的审查意见**，做出最终判定
-6. **更新任务状态**：使用 Bash 工具中的 sed 命令更新
-   - 通过：状态改为 VERIFIED，填写审计评分和意见
-   - 不通过：状态改为 REJECTED，说明原因和改进建议
-7. **生成审计报告**：使用 Write 工具写入 `planning/audit-reports/`
-
-### 第三轮：自动修复（REJECTED 任务）
-
-如果有任务被 REJECTED，**自动将审计意见反馈给 Codex 进行修复**：
-
-```bash
-codex exec -C "$(pwd)" --full-auto "你需要修复以下代码审查中发现的问题：
-
-任务：[任务标题]
-相关文件：[文件列表]
-
-审计评分：XX/100
-审计意见：
-[Claude 和 Codex 的审查意见]
-
-具体问题：
-[逐条列出需要修复的问题]
-
-请逐一修复以上问题，确保：
-1. 所有问题都得到解决
-2. 不引入新的问题
-3. 保持代码风格一致"
-```
-
-修复完成后，将任务状态从 REJECTED 改回 DONE，重新进入审计流程。
-
-**修复循环上限**：每个任务最多修复 3 次。超过 3 次仍未通过，标记为 FAILED 并通知用户人工介入。
-
-### 审计评分标准（0-100）
-
-- 90-100：优秀，完全符合要求
-- 80-89：良好，基本符合要求，有小问题
-- 70-79：及格，符合基本要求，但需改进
-- 60-69：不及格，存在明显问题
-- 0-59：严重不合格，需要重做
-
-### 审计报告格式
-
-使用 Write 工具写入 `planning/audit-reports/YYYYMMDD-任务XXX-audit.md`：
-
-```markdown
-# 审计报告：任务 #XXX
-
-**审计时间**: YYYY-MM-DD HH:MM:SS
-**任务标题**: [标题]
-**修复轮次**: 第 X 轮（首次 / 修复后复审）
-
-## Codex 审查结果
-- **评分**: XX/100
-- **结论**: PASS / FAIL
-- **发现问题**:
-  - [问题 1]
-  - [问题 2]
-
-## Claude 审查结果
-- **评分**: XX/100
-- **结论**: VERIFIED / REJECTED
-
-## 代码质量
-- [评价]
-
-## 功能正确性
-- [评价]
-
-## 安全性
-- [评价]
-
-## 最终判定
-- **综合评分**: XX/100（Codex 和 Claude 评分加权平均）
-- **最终结论**: VERIFIED / REJECTED
-- **改进建议**:
-  - [建议]
-```
+**第三轮：自动修复** — REJECTED 任务由 Codex 读取审计报告修复，修复后重置审查状态重新进入审计。修复上限 3 次，超过则标记 FAILED 通知用户人工介入。
 
 ---
 
 ## 恢复开发流程
 
-如果用户之前完成了访谈，现在想继续开发，识别以下触发词：
+识别触发词："开始开发"、"启动 Codex"、"继续开发"、"现在可以开发了"
 
-- "开始开发"、"启动 Codex"、"继续开发"、"现在可以开发了"
-
-当识别到这些触发词时：
-
-1. 使用 Read 工具检查 `planning/codex-tasks.md` 是否存在
-2. 如果存在，检查任务状态：
-   - 有 OPEN 任务：开始执行流程（第 6 步）
-   - 有 IN_PROGRESS 任务：提醒可能有孤儿任务，用 sed 回退为 OPEN 后继续
-   - 所有任务都是 DONE/VERIFIED：提醒用户可以进行审计或所有任务已完成
-3. 如果不存在：询问用户是否需要重新进行访谈
+1. 检查 `planning/codex-tasks.md` 是否存在
+2. 有 OPEN 任务 → 执行第 6 步；有 IN_PROGRESS 任务 → 回退为 OPEN 后继续；全部 DONE/VERIFIED → 提示可进行审计
+3. 不存在 → 询问是否重新访谈
 
 ---
 
-## 监控命令（内联）
+## 监控命令
 
-以下命令可以直接使用 Bash 工具执行，无需外部脚本：
-
-### 查看任务进度
 ```bash
-grep -E "\*\*状态\*\*:" planning/codex-tasks.md | sed 's/.*\*\*状态\*\*: //' | sort | uniq -c
+# 查看任务进度统计
+bash skill/scripts/summarize_progress.sh
+
+# 查看 checkpoint 状态
+cat .dual-ai-collab/checkpoints/state.json 2>/dev/null || echo "无活跃流程"
+
+# 查看 Codex 进程
+pgrep -f "codex exec" && echo "Codex 运行中" || echo "无 Codex 进程"
+
+# 查看任务日志
+tail -n 20 .dual-ai-collab/logs/task-*.log 2>/dev/null
 ```
 
-### 查看当前执行的任务
+---
+
+## 进度报告
+
+触发词："生成报告"、"查看进度"、"项目进度"
+
 ```bash
-awk '/## 任务 #/,/^---$/' planning/codex-tasks.md | awk '/IN_PROGRESS/{found=1} found'
+bash skill/scripts/summarize_progress.sh
 ```
 
-### 统计任务状态
-```bash
-echo "OPEN: $(awk '/\*\*状态\*\*: OPEN/ {c++} END {print c+0}' planning/codex-tasks.md)"
-echo "IN_PROGRESS: $(awk '/\*\*状态\*\*: IN_PROGRESS/ {c++} END {print c+0}' planning/codex-tasks.md)"
-echo "DONE: $(awk '/\*\*状态\*\*: DONE/ {c++} END {print c+0}' planning/codex-tasks.md)"
-echo "VERIFIED: $(awk '/\*\*状态\*\*: VERIFIED/ {c++} END {print c+0}' planning/codex-tasks.md)"
-echo "REJECTED: $(awk '/\*\*状态\*\*: REJECTED/ {c++} END {print c+0}' planning/codex-tasks.md)"
-```
-
-### 查看日志
-```bash
-tail -n 50 .dual-ai-collab/logs/worker.log 2>/dev/null || echo "暂无日志"
-```
+统计各状态任务数、完成率、审计通过率、预估剩余时间，写入 `planning/progress-reports/YYYYMMDD-HHMMSS-progress.md`。
 
 ---
 
 ## 重要提示
 
 1. **本 Skill 完全自包含**：只需 `cp dual-ai-collab.md ~/.claude/skills/` 即可使用
-2. **无需外部脚本**：所有操作通过 Claude 的 Bash/Read/Write/Edit 工具直接完成
-3. **访谈必须深入**：不要问显而易见的问题，持续 5-10 轮直到需求明确
-4. **使用 AskUserQuestion**：必须使用这个工具进行访谈
-5. **任务拆分合理**：每个任务 1-3 小时，独立可测
-6. **访谈后自动启动开发**：访谈完成后自动生成任务板并启动 Codex，全程无需用户确认
-7. **安全第一**：不要在文档中记录敏感信息（API 密钥、密码、Token）
-8. **每个任务完成后报告进度**：让用户了解执行情况
-9. **审计严格**：按评分标准客观评价，REJECTED 的任务需要说明具体原因
+2. **访谈必须深入**：不要问显而易见的问题，持续 5-10 轮直到需求明确
+3. **使用 AskUserQuestion**：必须使用这个工具进行访谈
+4. **任务拆分合理**：每个任务 1-3 小时，独立可测
+5. **规划后等待用户审查**：任务板生成后必须等用户确认才能启动开发
+6. **Checkpoint 持久化**：每次阶段转换必须更新 `.dual-ai-collab/checkpoints/state.json`
+7. **Codex 后台执行**：使用 `run_in_background: true` 启动 Codex，避免阻塞 Claude
+8. **对话压缩后自动恢复**：触发 Skill 时先检查 checkpoint，有则恢复，无则从头开始
+9. **安全第一**：不要在文档中记录敏感信息（API 密钥、密码、Token）
+10. **审计严格**：按评分标准客观评价，REJECTED 的任务需说明具体原因
 
 ---
 
 ## 故障排查
 
-**问题 1：Codex CLI 未安装**
-```bash
-npm install -g @openai/codex-cli
-```
+> 📖 详细故障排查步骤见 `references/troubleshooting.md`
 
-**问题 2：任务一直处于 IN_PROGRESS**
-使用 Bash 工具回退：
-```bash
-sed -i 's/\*\*状态\*\*: IN_PROGRESS/\*\*状态\*\*: OPEN/g' planning/codex-tasks.md
-```
-
-**问题 3：任务板格式错误**
-使用 Read 工具检查格式，用 Edit 工具修复。
-
----
-
-## 进度报告
-
-当识别到以下触发词时，自动生成格式化的项目进度报告：
-
-**触发词**："生成报告"、"查看进度"、"项目进度"
-
-### 生成步骤
-
-1. 使用 Bash 工具统计任务板各状态数量
-2. 计算完成率、审计通过率、预估剩余时间
-3. 使用 Write 工具将报告写入 `planning/progress-reports/`
-
-### 统计命令
-
-```bash
-# 统计各状态任务数
-TOTAL=$(awk '/## 任务 #[0-9]+:/' planning/codex-tasks.md | wc -l)
-OPEN=$(awk '/\*\*状态\*\*: OPEN/ {c++} END {print c+0}' planning/codex-tasks.md)
-IN_PROGRESS=$(awk '/\*\*状态\*\*: IN_PROGRESS/ {c++} END {print c+0}' planning/codex-tasks.md)
-DONE=$(awk '/\*\*状态\*\*: DONE/ {c++} END {print c+0}' planning/codex-tasks.md)
-VERIFIED=$(awk '/\*\*状态\*\*: VERIFIED/ {c++} END {print c+0}' planning/codex-tasks.md)
-REJECTED=$(awk '/\*\*状态\*\*: REJECTED/ {c++} END {print c+0}' planning/codex-tasks.md)
-
-# 按优先级统计完成情况
-P1_TOTAL=$(awk '/\*\*优先级\*\*: P1/ {c++} END {print c+0}' planning/codex-tasks.md)
-P1_DONE=$(awk '
-    /## 任务 #/ { in_task=1; is_p1=0; is_done=0 }
-    in_task && /\*\*优先级\*\*: P1/ { is_p1=1 }
-    in_task && /\*\*状态\*\*: (DONE|VERIFIED)/ { is_done=1 }
-    in_task && /^---$/ { if (is_p1 && is_done) c++; in_task=0 }
-    END { print c+0 }
-' planning/codex-tasks.md)
-
-P2_TOTAL=$(awk '/\*\*优先级\*\*: P2/ {c++} END {print c+0}' planning/codex-tasks.md)
-P2_DONE=$(awk '
-    /## 任务 #/ { in_task=1; is_p2=0; is_done=0 }
-    in_task && /\*\*优先级\*\*: P2/ { is_p2=1 }
-    in_task && /\*\*状态\*\*: (DONE|VERIFIED)/ { is_done=1 }
-    in_task && /^---$/ { if (is_p2 && is_done) c++; in_task=0 }
-    END { print c+0 }
-' planning/codex-tasks.md)
-
-P3_TOTAL=$(awk '/\*\*优先级\*\*: P3/ {c++} END {print c+0}' planning/codex-tasks.md)
-P3_DONE=$(awk '
-    /## 任务 #/ { in_task=1; is_p3=0; is_done=0 }
-    in_task && /\*\*优先级\*\*: P3/ { is_p3=1 }
-    in_task && /\*\*状态\*\*: (DONE|VERIFIED)/ { is_done=1 }
-    in_task && /^---$/ { if (is_p3 && is_done) c++; in_task=0 }
-    END { print c+0 }
-' planning/codex-tasks.md)
-
-# 计算完成率（DONE + VERIFIED 视为完成）
-COMPLETED=$((DONE + VERIFIED))
-COMPLETION_RATE=$(awk "BEGIN { printf \"%.1f\", ($COMPLETED / ($TOTAL > 0 ? $TOTAL : 1)) * 100 }")
-
-# 计算审计通过率（VERIFIED / (DONE + VERIFIED + REJECTED)）
-AUDITED=$((VERIFIED + REJECTED))
-AUDIT_RATE=$(awk "BEGIN { printf \"%.1f\", ($VERIFIED / ($AUDITED > 0 ? $AUDITED : 1)) * 100 }")
-
-# 预估剩余时间（假设每个 OPEN 任务平均 2 小时）
-REMAINING_HOURS=$((OPEN * 2))
-
-echo "统计完成：总任务=${TOTAL}, 完成率=${COMPLETION_RATE}%, 审计通过率=${AUDIT_RATE}%, 预计剩余=${REMAINING_HOURS}h"
-```
-
-### 报告格式
-
-使用 Write 工具写入 `planning/progress-reports/YYYYMMDD-HHMMSS-progress.md`：
-
-```markdown
-# 项目进度报告
-
-**生成时间**: YYYY-MM-DD HH:MM:SS
-**任务板**: planning/codex-tasks.md
-
----
-
-## 总进度
-
-| 指标 | 数值 |
-|------|------|
-| 总任务数 | X |
-| 已完成（DONE + VERIFIED） | X |
-| 完成率 | XX.X% |
-| 审计通过率 | XX.X% |
-| 预估剩余时间 | X 小时 |
-
-## 任务状态分布
-
-| 状态 | 数量 |
-|------|------|
-| OPEN（待开发） | X |
-| IN_PROGRESS（开发中） | X |
-| DONE（已完成待审计） | X |
-| VERIFIED（审计通过） | X |
-| REJECTED（审计不通过） | X |
-
-## 各优先级完成情况
-
-| 优先级 | 总数 | 已完成 | 完成率 |
-|--------|------|--------|--------|
-| P1（高优先级） | X | X | XX% |
-| P2（中优先级） | X | X | XX% |
-| P3（低优先级） | X | X | XX% |
-
-## 审计情况
-
-- 已审计任务：X 个
-- 审计通过（VERIFIED）：X 个
-- 审计不通过（REJECTED）：X 个
-- 审计通过率：XX.X%
-
-## 预估剩余时间
-
-- 待开发任务：X 个
-- 按每任务平均 2 小时估算
-- **预估剩余：X 小时**
-
----
-
-*报告由 Dual AI Collaboration Skill v2.1.0 自动生成*
-```
+常见问题快速处理：
+- **Codex 未安装**：`npm install -g @openai/codex-cli`
+- **任务卡在 IN_PROGRESS**：`sed -i 's/\*\*状态\*\*: IN_PROGRESS/\*\*状态\*\*: OPEN/g' planning/codex-tasks.md`
+- **流程中断恢复**：重新触发 Skill，自动检测 checkpoint 恢复
+- **清理状态**：`rm -f .dual-ai-collab/checkpoints/state.json`
 
 ---
 
@@ -892,9 +349,6 @@ mkdir -p ~/.claude/skills
 ```
 
 安装完成后，在 Claude Code 中输入以下任意魔法词即可使用：
-- 🤖 启动双 AI
-- 🚀 开始协作
-- 💬 深入访谈
-- 🔍 审计代码
+- 🤖 启动双 AI  |  🚀 开始协作  |  💬 深入访谈  |  🔍 审计代码
 
 **无需任何其他配置，开箱即用。**
