@@ -147,6 +147,28 @@ bash skill/scripts/select_next_task.sh
 
 **核心原则：Codex 在后台执行，Claude 不阻塞等待。**
 
+#### 6.0 环境准备（如需虚拟环境）
+
+如果项目需要虚拟环境（Python 项目、有 requirements.txt/pyproject.toml/environment.yml 等），Claude 负责创建：
+
+```bash
+# 使用 conda 创建项目虚拟环境
+conda create -n [项目名] python=[版本] -y
+conda activate [项目名]
+pip install -r requirements.txt  # 或其他依赖安装方式
+```
+
+环境创建完成后，记录激活命令到 `.dual-ai-collab/env-info.txt`：
+
+```bash
+echo "conda activate [项目名]" > .dual-ai-collab/env-info.txt
+```
+
+后续所有 Codex 执行任务的提示词中必须包含环境激活指令：
+```
+在执行前先运行：source $(conda info --base)/etc/profile.d/conda.sh && conda activate [项目名]
+```
+
 #### 6.1 启动前检查 & 写入 checkpoint
 
 检查 Codex CLI 和任务板是否存在，写入 checkpoint：
