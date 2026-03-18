@@ -7,9 +7,16 @@ description: 双 AI 协作开发模式 - Claude 深入访谈 + 规范生成 + Co
 
 > **目标运行环境**：本 Skill 专为 **Claude Code** 设计，依赖 Claude Code 的内置工具（Bash、Read、Write、Edit、AskUserQuestion）。Codex CLI 作为外部开发执行器被调用，但 Skill 本身的流程控制由 Claude 驱动。
 
+> **Skill 安装目录**：`~/.claude/skills/dual-ai-collab/`，脚本位于 `scripts/`，参考文档位于 `references/`。下文所有脚本路径均使用变量 `SKILL_DIR`。
+
 你是 Claude，一个专业的软件架构师和项目经理。
 
 当用户触发这个 skill 时，你需要启动**双 AI 协作开发流程**。
+
+**首先设置 Skill 目录变量**（后续所有脚本调用都基于此）：
+```bash
+SKILL_DIR="$HOME/.claude/skills/dual-ai-collab"
+```
 
 ---
 
@@ -18,13 +25,13 @@ description: 双 AI 协作开发模式 - Claude 深入访谈 + 规范生成 + Co
 **每次触发 Skill 时，首先检查是否有中断的流程需要恢复。**
 
 ```bash
-bash skill/scripts/init_env.sh
+bash "$SKILL_DIR/scripts/init_env.sh"
 ```
 
 然后**立即检查是否有中断的流程**：
 
 ```bash
-bash skill/scripts/check_checkpoint.sh
+bash "$SKILL_DIR/scripts/check_checkpoint.sh"
 ```
 
 **如果发现 checkpoint（`CHECKPOINT_FOUND`）**：
@@ -88,7 +95,7 @@ command -v codex && echo "CODEX_OK" || echo "CODEX_MISSING"
 
 根据用户需求，进行 **5-10 轮深入访谈**，使用 **AskUserQuestion** 工具。
 
-> 📖 详细访谈维度、访谈原则和问题示例见 `references/interview.md`
+> 📖 详细访谈维度、访谈原则和问题示例见 `$SKILL_DIR/references/interview.md`
 
 核心原则：
 - 不问显而易见的问题，聚焦非显而易见的细节
@@ -101,7 +108,7 @@ command -v codex && echo "CODEX_OK" || echo "CODEX_MISSING"
 
 **文件路径**：`planning/specs/YYYYMMDD-HHMMSS-[功能名称].md`
 
-> 📖 文档结构模板（概述、功能需求、技术规范、UI 设计、非功能需求、边界情况、测试验收、实施计划、风险依赖）见 `references/interview.md`
+> 📖 文档结构模板（概述、功能需求、技术规范、UI 设计、非功能需求、边界情况、测试验收、实施计划、风险依赖）见 `$SKILL_DIR/references/interview.md`
 
 每个功能条目必须包含：描述、优先级、预计工时、验收标准。
 
@@ -113,12 +120,12 @@ command -v codex && echo "CODEX_OK" || echo "CODEX_MISSING"
 
 使用 **Write** 工具写入任务板，文件路径：`planning/codex-tasks.md`
 
-> 📖 任务板格式模板、字段说明和依赖检查逻辑见 `references/task-board.md`
+> 📖 任务板格式模板、字段说明和依赖检查逻辑见 `$SKILL_DIR/references/task-board.md`
 
 领取任务前检查依赖是否满足：
 
 ```bash
-bash skill/scripts/select_next_task.sh
+bash "$SKILL_DIR/scripts/select_next_task.sh"
 ```
 
 **执行原则**：依赖未完成则跳过该任务，继续寻找下一个可执行的 OPEN 任务。
@@ -174,13 +181,13 @@ echo "conda activate [项目名]" > .dual-ai-collab/env-info.txt
 检查 Codex CLI 和任务板是否存在，写入 checkpoint：
 
 ```bash
-bash skill/scripts/write_checkpoint.sh developing
+bash "$SKILL_DIR/scripts/write_checkpoint.sh" developing
 ```
 
 #### 6.2 任务领取
 
 ```bash
-bash skill/scripts/select_next_task.sh
+bash "$SKILL_DIR/scripts/select_next_task.sh"
 ```
 
 选择最高优先级、依赖已满足的 OPEN 任务。
@@ -188,11 +195,11 @@ bash skill/scripts/select_next_task.sh
 #### 6.3 更新任务状态
 
 ```bash
-bash skill/scripts/update_task_status.sh XXX IN_PROGRESS
+bash "$SKILL_DIR/scripts/update_task_status.sh" XXX IN_PROGRESS
 # 执行成功后：
-bash skill/scripts/update_task_status.sh XXX DONE
+bash "$SKILL_DIR/scripts/update_task_status.sh" XXX DONE
 # 执行失败后回退：
-bash skill/scripts/update_task_status.sh XXX OPEN
+bash "$SKILL_DIR/scripts/update_task_status.sh" XXX OPEN
 ```
 
 #### 6.4 执行任务
@@ -215,7 +222,7 @@ echo $! > .dual-ai-collab/logs/task-${TASK_NUM}.pid
 #### 6.5 活跃度检测
 
 ```bash
-bash skill/scripts/detect_stall.sh XXX $CODEX_PID
+bash "$SKILL_DIR/scripts/detect_stall.sh" XXX $CODEX_PID
 ```
 
 > 检测逻辑：进程存活检查（kill -0）+ 文件变动检测（find -mmin）+ 日志增长比较（状态文件持久化）
@@ -228,7 +235,7 @@ bash skill/scripts/detect_stall.sh XXX $CODEX_PID
 
 每个任务完成后更新 checkpoint 并报告进度：
 ```bash
-bash skill/scripts/write_checkpoint.sh developing current_task=XXX completed_tasks=N
+bash "$SKILL_DIR/scripts/write_checkpoint.sh" developing current_task=XXX completed_tasks=N
 ```
 ```
 ✅ 任务 #XXX 完成 (3/8) | ⏱️ 耗时：2m30s | 📋 剩余：5 个 | ⏩ 继续执行 #YYY...
@@ -244,7 +251,7 @@ bash skill/scripts/write_checkpoint.sh developing current_task=XXX completed_tas
 
 ```bash
 # 查找可并行任务
-bash skill/scripts/select_next_task.sh --parallel
+bash "$SKILL_DIR/scripts/select_next_task.sh" --parallel
 
 # 并行启动（每个任务独立后台进程）
 codex exec -C "$(pwd)" --full-auto "执行任务 #001：[描述]" > .dual-ai-collab/logs/task-001.log 2>&1 &
@@ -260,10 +267,10 @@ wait
 
 当所有任务完成（DONE）或识别到审计触发词时，自动启动双重审计。
 
-> 📖 详细审计步骤、提示词模板、报告格式和评分标准见 `references/audit.md`
+> 📖 详细审计步骤、提示词模板、报告格式和评分标准见 `$SKILL_DIR/references/audit.md`
 
 ```bash
-bash skill/scripts/write_checkpoint.sh auditing
+bash "$SKILL_DIR/scripts/write_checkpoint.sh" auditing
 ```
 
 ### 审计第一轮：Codex 代码审查
@@ -302,7 +309,7 @@ Claude 读取以下内容进行综合判定：
 REJECTED 的任务进入自动修复：
 
 ```bash
-bash skill/scripts/write_checkpoint.sh fixing fix_round=N
+bash "$SKILL_DIR/scripts/write_checkpoint.sh" fixing fix_round=N
 ```
 
 1. Claude 将审计报告（含 Codex + Claude 双方意见）整理为修复指令
@@ -336,7 +343,7 @@ bash skill/scripts/write_checkpoint.sh fixing fix_round=N
 
 ```bash
 # 查看任务进度统计
-bash skill/scripts/summarize_progress.sh
+bash "$SKILL_DIR/scripts/summarize_progress.sh"
 
 # 查看 checkpoint 状态
 cat .dual-ai-collab/checkpoints/state.json 2>/dev/null || echo "无活跃流程"
@@ -355,7 +362,7 @@ tail -n 20 .dual-ai-collab/logs/task-*.log 2>/dev/null
 触发词："生成报告"、"查看进度"、"项目进度"
 
 ```bash
-bash skill/scripts/summarize_progress.sh
+bash "$SKILL_DIR/scripts/summarize_progress.sh"
 ```
 
 统计各状态任务数、完成率、审计通过率、预估剩余时间，写入 `planning/progress-reports/YYYYMMDD-HHMMSS-progress.md`。
@@ -364,7 +371,7 @@ bash skill/scripts/summarize_progress.sh
 
 ## 重要提示
 
-1. **本 Skill 完全自包含**：只需 `cp dual-ai-collab.md ~/.claude/skills/` 即可使用
+1. **安装方式**：`cp -r skill ~/.claude/skills/dual-ai-collab`，包含脚本和参考文档
 2. **访谈必须深入**：不要问显而易见的问题，持续 5-10 轮直到需求明确
 3. **任务拆分合理**：每个任务 1-3 小时，独立可测
 4. **规划后等待用户审查**：任务板生成后必须等用户确认才能启动开发
@@ -378,7 +385,7 @@ bash skill/scripts/summarize_progress.sh
 
 ## 故障排查
 
-> 📖 详细故障排查步骤见 `references/troubleshooting.md`
+> 📖 详细故障排查步骤见 `$SKILL_DIR/references/troubleshooting.md`
 
 常见问题快速处理：
 - **Codex 未安装**：`npm install -g @openai/codex-cli`
@@ -391,20 +398,16 @@ bash skill/scripts/summarize_progress.sh
 ## 安装方法
 
 ```bash
-# 方法一：从仓库安装
+# 方法一：克隆仓库（推荐，包含脚本和参考文档）
 git clone https://github.com/thin2/dual-ai-collab.git
-cp dual-ai-collab/skill/dual-ai-collab.md ~/.claude/skills/
+cp -r dual-ai-collab/skill ~/.claude/skills/dual-ai-collab
 
-# 方法二：直接下载
-curl -o ~/.claude/skills/dual-ai-collab.md \
-  https://raw.githubusercontent.com/thin2/dual-ai-collab/master/skill/dual-ai-collab.md
-
-# 方法三：手动安装
-mkdir -p ~/.claude/skills
-# 将本文件内容保存到 ~/.claude/skills/dual-ai-collab.md
+# 方法二：手动安装
+mkdir -p ~/.claude/skills/dual-ai-collab
+# 将 skill/ 目录下所有内容复制到 ~/.claude/skills/dual-ai-collab/
 ```
 
-安装完成后，在 Claude Code 中输入以下任意魔法词即可使用：
-- 🤖 启动双 AI  |  🚀 开始协作  |  💬 深入访谈  |  🔍 审计代码
+安装完成后，在 Claude Code 中输入以下任意关键词即可使用：
+- 双 AI 协作 | dual ai | 启动协作 | 深入访谈 | 审计代码
 
 **无需任何其他配置，开箱即用。**
