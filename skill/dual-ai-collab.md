@@ -34,13 +34,10 @@ bash "$SKILL_DIR/scripts/init_env.sh"
 bash "$SKILL_DIR/scripts/check_checkpoint.sh"
 ```
 
-**如果发现 checkpoint（`CHECKPOINT_FOUND`）**：
-- 读取 `state.json` 中的 `phase` 字段，确定中断在哪个阶段
-- **直接跳转到对应阶段继续执行**，不要重新访谈或重新生成文档
-- 恢复逻辑见下方「恢复执行规则」
+- **`CHECKPOINT_FOUND`** → 读取 `state.json` 中的 `phase`，按恢复文档跳转到对应阶段继续执行
+- **`NO_CHECKPOINT`** → 检查 Codex CLI，从第 1 步开始
 
-**如果没有 checkpoint（`NO_CHECKPOINT`）**：
-- 检查 Codex CLI 是否可用，然后从第 1 步开始
+> 📖 恢复逻辑详情（phase 映射、最小文件集、损坏处理）见 `$SKILL_DIR/references/recovery.md`
 
 ```bash
 command -v codex && echo "CODEX_OK" || echo "CODEX_MISSING"
@@ -48,39 +45,22 @@ command -v codex && echo "CODEX_OK" || echo "CODEX_MISSING"
 
 - 如果 `CODEX_MISSING`：提示用户安装（`npm install -g @openai/codex-cli`），但仍可继续访谈和文档生成
 
-### 恢复执行规则
-
-根据 `state.json` 中的 `phase` 值跳转：
-
-| phase 值 | 恢复动作 |
-|-----------|----------|
-| `interview` | 读取已收集信息，继续未完成的访谈 |
-| `spec_generated` | 跳到第 4 步（拆分任务） |
-| `tasks_created` | 跳到第 5 步（等待用户审查） |
-| `user_approved` | 跳到第 6 步（启动开发） |
-| `developing` | 读取任务板，找到 OPEN/IN_PROGRESS 任务继续执行 |
-| `auditing` | 读取任务板，对 DONE 任务继续审计 |
-| `fixing` | 读取任务板，对 REJECTED 任务继续修复 |
-
-**恢复时必须向用户报告**：
-```
-🔄 检测到中断的流程，正在恢复...
-📍 中断阶段：[phase]
-📋 任务板：planning/codex-tasks.md
-⏩ 继续执行...
-```
-
 ### Checkpoint 状态文件
 
-文件路径：`.dual-ai-collab/checkpoints/state.json`，字段：`phase`、`spec_file`、`task_file`、`current_task`、`total_tasks`、`completed_tasks`、`fix_round`、`updated_at`。
+文件路径：`.dual-ai-collab/checkpoints/state.json`
 
-**写入时机**（每次阶段转换时必须更新）：
-- 访谈完成 → `phase: "spec_generated"`
-- 任务板创建完成 → `phase: "tasks_created"`
-- 用户确认开始开发 → `phase: "user_approved"`
-- 开始执行任务 → `phase: "developing"`，更新 `current_task`
-- 进入审计 → `phase: "auditing"`
-- 进入修复 → `phase: "fixing"`，更新 `fix_round`
+**写入方式**（每次阶段转换时调用）：
+```bash
+bash "$SKILL_DIR/scripts/write_checkpoint.sh" <phase> [key=value ...]
+```
+
+写入时机：
+- 访谈完成 → `spec_generated`
+- 任务板创建 → `tasks_created`
+- 用户确认 → `user_approved`
+- 开始执行 → `developing current_task=X total_tasks=N`
+- 进入审计 → `auditing`
+- 进入修复 → `fixing fix_round=N`
 - 全部完成 → 删除 state.json
 
 ---
@@ -130,9 +110,15 @@ bash "$SKILL_DIR/scripts/select_next_task.sh"
 
 **执行原则**：依赖未完成则跳过该任务，继续寻找下一个可执行的 OPEN 任务。
 
-### 第 5 步：展示摘要并等待用户审查
+### 第 5 步：先审计规划，再等待用户确认
 
-任务板创建完成后，展示摘要并**等待用户审查规划文档**：
+任务板创建完成后，先由 Claude 对规划文档做主审。
+
+- 必查项：目标覆盖、任务拆分、依赖关系、验收标准、风险记录
+- 如需补漏，可让 Codex 做一次**补充审查**，只查遗漏点，不重复整份审计
+- 规划审计和用户确认提示词模板见 `$SKILL_DIR/references/prompt-templates.md`
+
+确认规划达到可开发状态后，再展示摘要并**等待用户审查规划文档**：
 
 ```
 ✅ 需求规范和任务板已创建完成！
@@ -211,13 +197,20 @@ bash "$SKILL_DIR/scripts/update_task_status.sh" XXX OPEN
 ```bash
 TASK_NUM="XXX"
 LOG_FILE=".dual-ai-collab/logs/task-${TASK_NUM}.log"
-codex exec -C "$(pwd)" --full-auto "你是专业开发工程师，执行以下任务：[任务内容]
+EXIT_FILE=".dual-ai-collab/logs/task-${TASK_NUM}.exit"
+(
+  codex exec -C "$(pwd)" --full-auto "你是专业开发工程师，执行以下任务：[任务内容]
 要求：仔细阅读验收标准，编写高质量可维护代码，添加必要注释，满足所有验收标准。" \
-  > "$LOG_FILE" 2>&1 &
-echo $! > .dual-ai-collab/logs/task-${TASK_NUM}.pid
+    > "$LOG_FILE" 2>&1
+  echo $? > "$EXIT_FILE"
+) &
+CODEX_PID=$!
+echo "$CODEX_PID" > .dual-ai-collab/logs/task-${TASK_NUM}.pid
 ```
 
 **前端/UI 任务额外流程**（文件含 `.html/.css/.vue/.tsx/.jsx/.svelte` 或描述含页面/组件/样式/布局等）：
+
+**硬规则**：如果任务涉及页面、组件、样式、布局、交互、动效或视觉优化，Claude 必须先调用 `/ui-ux-pro-max` 生成设计方案，再将该方案作为 Codex 的硬约束输入。没有设计方案时，不得直接进入前端编码。
 
 1. Claude 先调用 `/ui-ux-pro-max` skill，根据任务需求生成设计方案（配色、布局、组件结构、交互规范等）
 2. 将设计方案写入 `.dual-ai-collab/designs/task-XXX-design.md`
@@ -225,14 +218,19 @@ echo $! > .dual-ai-collab/logs/task-${TASK_NUM}.pid
 
 ```bash
 DESIGN=$(cat .dual-ai-collab/designs/task-${TASK_NUM}-design.md)
-codex exec -C "$(pwd)" --full-auto "你是专业前端开发工程师，执行以下任务：[任务内容]
+EXIT_FILE=".dual-ai-collab/logs/task-${TASK_NUM}.exit"
+(
+  codex exec -C "$(pwd)" --full-auto "你是专业前端开发工程师，执行以下任务：[任务内容]
 
 【设计规范】（必须严格遵循）：
 ${DESIGN}
 
 要求：严格按照设计规范实现，确保 UI 还原度、响应式适配、无障碍访问。" \
-  > "$LOG_FILE" 2>&1 &
-echo $! > .dual-ai-collab/logs/task-${TASK_NUM}.pid
+    > "$LOG_FILE" 2>&1
+  echo $? > "$EXIT_FILE"
+) &
+CODEX_PID=$!
+echo "$CODEX_PID" > .dual-ai-collab/logs/task-${TASK_NUM}.pid
 ```
 
 4. Codex 完成后，Claude 再次调用 `/ui-ux-pro-max` skill 审查前端代码是否符合设计方案
@@ -241,12 +239,18 @@ echo $! > .dual-ai-collab/logs/task-${TASK_NUM}.pid
 #### 6.5 活跃度检测
 
 ```bash
-bash "$SKILL_DIR/scripts/detect_stall.sh" XXX $CODEX_PID
+bash "$SKILL_DIR/scripts/detect_stall.sh" XXX "$CODEX_PID"
 ```
 
-> 检测逻辑：进程存活检查（kill -0）+ 文件变动检测（find -mmin）+ 日志增长比较（状态文件持久化）
+> 检测逻辑：进程存活检查（kill -0）+ 文件变动检测（基于任务级阈值）+ 日志增长比较（状态文件持久化）
 
-判定规则：连续 3 次 STALLED（约 3 分钟）→ kill 进程，回退任务为 OPEN，跳到下一个任务。轮询间隔 60 秒。
+卡死阈值优先级：
+
+1. 任务板中的 `**卡死阈值**`
+2. 任务板中的 `**执行级别**`（`quick=3m`、`normal=5m`、`heavy=10m`）
+3. 未配置时默认 `3m`
+
+判定规则：连续 3 次 STALLED → kill 进程，回退任务为 OPEN，跳到下一个任务。轮询间隔 60 秒。
 
 #### 6.6 执行循环
 
@@ -393,7 +397,7 @@ bash "$SKILL_DIR/scripts/summarize_progress.sh"
 1. **安装方式**：`cp -r skill ~/.claude/skills/dual-ai-collab`，包含脚本和参考文档
 2. **访谈必须深入**：不要问显而易见的问题，持续 5-10 轮直到需求明确
 3. **任务拆分合理**：每个任务 1-3 小时，独立可测
-4. **规划后等待用户审查**：任务板生成后必须等用户确认才能启动开发
+4. **规划先审计、再确认**：任务板生成后先做规划审计，再等用户确认启动开发
 5. **Checkpoint 持久化**：每次阶段转换必须更新 checkpoint
 6. **Codex 后台执行**：后台启动 Codex，避免阻塞主流程
 7. **对话压缩后自动恢复**：触发 Skill 时先检查 checkpoint，有则恢复
