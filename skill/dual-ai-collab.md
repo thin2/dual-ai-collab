@@ -206,6 +206,8 @@ bash "$SKILL_DIR/scripts/update_task_status.sh" XXX OPEN
 
 **所有任务统一由 Codex 后台执行**，使用 `run_in_background: true`：
 
+> 📖 各类任务的结构化提示词模板见 `$SKILL_DIR/references/prompt-templates.md`
+
 ```bash
 TASK_NUM="XXX"
 LOG_FILE=".dual-ai-collab/logs/task-${TASK_NUM}.log"
