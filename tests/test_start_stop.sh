@@ -45,6 +45,20 @@ fi
 
 teardown_test_env
 
+# --- 测试 4b：init_env.sh 应补齐流程依赖目录 ---
+setup_test_env
+
+it "init_env.sh 应创建 designs 和 progress-reports 目录"
+cd "$TEST_DIR"
+bash "$PROJECT_DIR/skill/scripts/init_env.sh" >/dev/null
+if [ -d "$TEST_DIR/.dual-ai-collab/designs" ] && [ -d "$TEST_DIR/planning/progress-reports" ]; then
+    pass
+else
+    fail "未创建 .dual-ai-collab/designs 或 planning/progress-reports"
+fi
+
+teardown_test_env
+
 # --- 测试 5：日志目录可自动创建 ---
 setup_test_env
 
@@ -107,6 +121,14 @@ if [ -d "$PROJECT_DIR/skill/references" ]; then
 else
     fail "references 目录不存在"
 fi
+
+# --- 测试 10b：run_task.sh 应存在 ---
+it "run_task.sh 应存在"
+assert_file_exists "$PROJECT_DIR/skill/scripts/run_task.sh"
+
+# --- 测试 10c：verify_task.sh 应存在 ---
+it "verify_task.sh 应存在"
+assert_file_exists "$PROJECT_DIR/skill/scripts/verify_task.sh"
 
 # --- 测试 11：不应存在已废弃的脚本文件 ---
 it "不应存在已废弃的 scripts 目录"

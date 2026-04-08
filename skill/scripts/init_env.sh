@@ -1,10 +1,5 @@
 #!/bin/bash
-# init_env.sh - 初始化工作环境
+# init_env.sh - 初始化工作环境（薄封装）
 set -e
-
-mkdir -p planning/specs
-mkdir -p planning/audit-reports
-mkdir -p .dual-ai-collab/logs
-mkdir -p .dual-ai-collab/checkpoints
-
-echo "ENV_READY"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec python3 "$SCRIPT_DIR/task_manager.py" init "$@"

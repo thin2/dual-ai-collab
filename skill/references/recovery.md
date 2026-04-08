@@ -60,9 +60,11 @@
 
 ### developing 阶段
 - 检查任务板中有无 IN_PROGRESS 的任务
-- 有 → 检查对应 Codex 进程是否还在运行（`pgrep -f "codex exec"`）
-  - 还在 → 继续轮询
-  - 已退出 → 检查退出码，更新状态为 DONE 或回退 OPEN
+- 有 → 通过执行器查询运行状态：`bash "$SKILL_DIR/scripts/run_task.sh" status XXX`
+  - running → 继续轮询
+  - success → 更新状态为 DONE
+  - failed/stopped/not_found → 回退为 OPEN
+  - 兼容方式：`pgrep -f "codex exec"` 检查进程
 - 无 → 选择下一个 OPEN 任务继续
 
 ### auditing / fixing 阶段
@@ -87,3 +89,12 @@
 📍 推断阶段：[phase]
 ⏩ 继续执行...
 ```
+
+在入口检查脚本中，损坏 checkpoint 会输出：
+
+```text
+CHECKPOINT_CORRUPTED
+state.json.corrupted
+```
+
+此时应优先检查任务板和审计报告，再按上面的恢复步骤继续。

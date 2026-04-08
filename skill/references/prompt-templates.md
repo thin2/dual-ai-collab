@@ -294,14 +294,63 @@ DONE / BLOCKED
 
 ## 3. 审查阶段
 
-### 3.1 最终代码审查 Prompt
+### 3.1 规范符合性审查 Prompt
 
-适用对象：Codex  
-适用场景：任务完成后的最终代码审查  
+适用对象：superpowers `spec-reviewer` / Codex / Claude  
+适用场景：第一轮审查，只判断“是否按任务描述和验收标准做了”  
+输入项：任务编号、标题、相关文件、验收标准、任务原始目标
+
+```text
+你是规范符合性审查员。你的职责不是评价代码风格，而是判断实现是否真的完成了任务目标。
+<task>
+任务编号：#[XXX]
+任务标题：[标题]
+任务目标：[一句话交付目标]
+相关文件：
+- [路径 1]
+- [路径 2]
+</task>
+<acceptance>
+- [ ] [标准 1]
+- [ ] [标准 2]
+- [ ] [标准 3]
+</acceptance>
+<focus>
+只回答这些问题：
+1. 是否完成了任务目标
+2. 验收标准是否逐项覆盖
+3. 是否有遗漏实现或偏题实现
+4. 是否存在需要用户补充确认的模糊点
+</focus>
+<constraints>
+- 不要讨论编码风格偏好
+- 不要把“可以优化”当成 FAIL
+- 没有证据就写 UNCLEAR，不要脑补
+</constraints>
+<output>
+严格输出：
+## Verdict
+PASS / FAIL / UNCLEAR
+## Blocking Issues
+1. [没有则写“无”]
+## Missing Coverage
+1. [没有则写“无”]
+## Need User Confirmation
+1. [没有则写“无”]
+## Acceptance Review
+- [标准 1]：PASS / FAIL / UNCLEAR - [说明]
+- [标准 2]：PASS / FAIL / UNCLEAR - [说明]
+</output>
+```
+
+### 3.2 代码质量审查 Prompt
+
+适用对象：superpowers `code-quality-reviewer` / Codex / Claude  
+适用场景：第二轮审查，在规范符合性通过后判断实现质量  
 输入项：任务编号、标题、相关文件、验收标准、风险关注点
 
 ```text
-你是资深代码审查员。请对以下任务做最终审查，重点找缺陷、回归风险和缺失验证。
+你是资深代码质量审查员。请对以下任务做第二轮审查，重点找结构性问题、回归风险和缺失验证。
 <task>
 任务编号：#[XXX]
 任务标题：[标题]
@@ -326,6 +375,7 @@ DONE / BLOCKED
 - 发现问题时优先给出可定位证据
 - 没有明显问题就明确写“未发现阻塞问题”
 - 不要输出泛泛而谈的风格建议
+- 不要重复第一轮已经确认通过的规范符合性内容
 </constraints>
 <output>
 严格输出：
@@ -343,17 +393,18 @@ PASS / FAIL
 </output>
 ```
 
-### 3.2 Claude 最终判定模板
+### 3.3 Claude 最终判定模板
 
 适用对象：Claude  
-适用场景：读取 Codex 审查结果后做最终决策
+适用场景：读取两轮审查结果后做最终决策
 
 ```text
 读取以下输入后做最终判定：
 1. 任务原始目标
 2. 验收标准
-3. 实际代码改动
-4. Codex 审查结果
+3. 第一轮规范符合性审查结果
+4. 第二轮代码质量审查结果
+5. 实际代码改动
 
 按以下顺序判断：
 1. 是否存在阻塞交付的问题
@@ -417,6 +468,49 @@ PASS / FAIL
 ```
 
 ### 4.3 卡死 / 连续失败升级 Prompt
+
+适用对象：superpowers `systematic-debugging` / Claude / rescue agent  
+适用场景：任务连续 STALLED、重复失败、日志显示明显异常
+
+```text
+你现在扮演系统化调试协调者。不要立刻建议“重试一下”，先做根因归类。
+<task>
+任务编号：#[XXX]
+任务标题：[标题]
+当前现象：[连续 STALLED / 重复失败 / 环境错误 / 未知异常]
+</task>
+<materials>
+相关日志尾部：
+[粘贴最后 100-200 行]
+最近改动：
+- [文件 1]
+- [文件 2]
+验收标准：
+- [标准 1]
+- [标准 2]
+</materials>
+<requirements>
+请按以下顺序输出：
+1. 现象摘要
+2. 最可能的根因类别（环境 / 任务拆分 / 上下文缺失 / 代码缺陷 / 未知）
+3. 最小下一步动作
+4. 是否值得立即重试
+</requirements>
+<output>
+严格输出：
+## Summary
+[最多 3 句]
+## Root Cause Category
+[环境 / 任务拆分 / 上下文缺失 / 代码缺陷 / 未知]
+## Recommended Actions
+1. [动作]
+2. [动作]
+## Retry Decision
+RETRY / DO_NOT_RETRY / NEED_USER_INPUT
+## Evidence
+1. [证据]
+</output>
+```
 
 适用对象：Claude -> 用户  
 适用场景：Codex 连续卡死、重复失败或任务现实与规划冲突

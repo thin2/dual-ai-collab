@@ -118,6 +118,8 @@ p2=$(get_stat "$stats" "p2")
 p3=$(get_stat "$stats" "p3")
 # 任务板有 2 个 P1, 2 个 P2, 1 个 P3
 assert_equals "2" "$p1"
+assert_equals "2" "$p2"
+assert_equals "1" "$p3"
 
 teardown_test_env
 
@@ -158,6 +160,7 @@ stats=$(generate_progress_stats "$TASK_BOARD")
 assert_equals "100" "$(get_stat "$stats" "completion_rate")"
 
 it "全部验收时审计通过率应为 100"
+stats=$(generate_progress_stats "$TASK_BOARD")
 assert_equals "100" "$(get_stat "$stats" "audit_rate")"
 
 teardown_test_env

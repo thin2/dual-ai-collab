@@ -30,6 +30,11 @@ setup_test_env() {
 # 清理临时测试环境
 teardown_test_env() {
     if [ -n "${TEST_DIR:-}" ] && [ -d "$TEST_DIR" ]; then
+        case "$PWD" in
+            "$TEST_DIR"|"$TEST_DIR"/*)
+                cd /tmp
+                ;;
+        esac
         rm -rf "$TEST_DIR"
     fi
 }

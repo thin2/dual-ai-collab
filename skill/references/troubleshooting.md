@@ -8,7 +8,17 @@ npm install -g @openai/codex-cli
 
 ## 问题 2：任务一直处于 IN_PROGRESS
 
-回退所有 IN_PROGRESS 任务：
+先尝试通过执行器终止并回退：
+```bash
+# 查询运行状态
+bash "$SKILL_DIR/scripts/run_task.sh" status XXX
+# 终止运行
+bash "$SKILL_DIR/scripts/run_task.sh" stop XXX
+# 回退状态
+bash "$SKILL_DIR/scripts/update_task_status.sh" XXX OPEN
+```
+
+批量回退所有 IN_PROGRESS 任务（兜底方式）：
 ```bash
 sed -i 's/\*\*状态\*\*: IN_PROGRESS/\*\*状态\*\*: OPEN/g' planning/codex-tasks.md
 ```
@@ -24,14 +34,29 @@ cat .dual-ai-collab/checkpoints/state.json
 
 活跃度检测会自动发现并处理。手动检查：
 ```bash
-# 查看 Codex 进程
+# 通过执行器查询状态
+bash "$SKILL_DIR/scripts/run_task.sh" status XXX
+
+# 通过执行器终止
+bash "$SKILL_DIR/scripts/run_task.sh" stop XXX
+
+# 兼容方式：查看 Codex 进程
 pgrep -f "codex exec" && echo "进程存在" || echo "无 Codex 进程"
 
 # 查看最近文件变动
 find . -name '*.py' -o -name '*.js' -o -name '*.ts' -not -path './node_modules/*' -newer .dual-ai-collab/logs/pids.log 2>/dev/null | head -10
 
-# 手动 kill 卡死的 Codex
+# 兜底：手动 kill 卡死的 Codex
 pkill -f "codex exec"
+```
+
+## 问题 4b：Codex 连续失败
+
+当同一任务连续失败时，可降级使用 `codex:rescue` agent 进行诊断：
+```bash
+# 查看失败日志
+tail -n 50 .dual-ai-collab/logs/task-XXX.log
+# 让 rescue agent 分析原因并给出修复建议
 ```
 
 ## 问题 5：流程完成后想清理状态

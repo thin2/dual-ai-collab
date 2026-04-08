@@ -35,6 +35,7 @@ bash "$SKILL_DIR/scripts/check_checkpoint.sh"
 ```
 
 - **`CHECKPOINT_FOUND`** → 读取 `state.json` 中的 `phase`，按恢复文档跳转到对应阶段继续执行
+- **`CHECKPOINT_CORRUPTED`** → 读取恢复文档中的损坏处理逻辑，优先根据任务板推断阶段
 - **`NO_CHECKPOINT`** → 检查 Codex CLI，从第 1 步开始
 
 > 📖 恢复逻辑详情（phase 映射、最小文件集、损坏处理）见 `$SKILL_DIR/references/recovery.md`
@@ -182,7 +183,7 @@ bash "$SKILL_DIR/scripts/select_next_task.sh"
 
 ```bash
 bash "$SKILL_DIR/scripts/update_task_status.sh" XXX IN_PROGRESS
-# 执行成功后：
+# 执行成功且验收命令通过后：
 bash "$SKILL_DIR/scripts/update_task_status.sh" XXX DONE
 # 执行失败后回退：
 bash "$SKILL_DIR/scripts/update_task_status.sh" XXX OPEN
@@ -190,23 +191,18 @@ bash "$SKILL_DIR/scripts/update_task_status.sh" XXX OPEN
 
 #### 6.4 执行任务
 
-**所有任务统一由 Codex 后台执行**，使用 `run_in_background: true`：
+**所有任务统一通过执行器抽象层启动**，使用 `run_in_background: true`：
 
 > 📖 各类任务的结构化提示词模板见 `$SKILL_DIR/references/prompt-templates.md`
 
 ```bash
 TASK_NUM="XXX"
-LOG_FILE=".dual-ai-collab/logs/task-${TASK_NUM}.log"
-EXIT_FILE=".dual-ai-collab/logs/task-${TASK_NUM}.exit"
-(
-  codex exec -C "$(pwd)" --full-auto "你是专业开发工程师，执行以下任务：[任务内容]
-要求：仔细阅读验收标准，编写高质量可维护代码，添加必要注释，满足所有验收标准。" \
-    > "$LOG_FILE" 2>&1
-  echo $? > "$EXIT_FILE"
-) &
-CODEX_PID=$!
-echo "$CODEX_PID" > .dual-ai-collab/logs/task-${TASK_NUM}.pid
+bash "$SKILL_DIR/scripts/run_task.sh" start "$TASK_NUM" \
+  "你是专业开发工程师，执行以下任务：[任务内容]
+要求：仔细阅读验收标准，编写高质量可维护代码，添加必要注释，满足所有验收标准。"
 ```
+
+> `run_task.sh start` 会自动创建日志文件、PID 文件和运行记录（`.dual-ai-collab/runs/task-XXX.json`），输出 JSON 格式的 run record。
 
 **前端/UI 任务额外流程**（文件含 `.html/.css/.vue/.tsx/.jsx/.svelte` 或描述含页面/组件/样式/布局等）：
 
@@ -218,19 +214,13 @@ echo "$CODEX_PID" > .dual-ai-collab/logs/task-${TASK_NUM}.pid
 
 ```bash
 DESIGN=$(cat .dual-ai-collab/designs/task-${TASK_NUM}-design.md)
-EXIT_FILE=".dual-ai-collab/logs/task-${TASK_NUM}.exit"
-(
-  codex exec -C "$(pwd)" --full-auto "你是专业前端开发工程师，执行以下任务：[任务内容]
+bash "$SKILL_DIR/scripts/run_task.sh" start "$TASK_NUM" \
+  "你是专业前端开发工程师，执行以下任务：[任务内容]
 
 【设计规范】（必须严格遵循）：
 ${DESIGN}
 
-要求：严格按照设计规范实现，确保 UI 还原度、响应式适配、无障碍访问。" \
-    > "$LOG_FILE" 2>&1
-  echo $? > "$EXIT_FILE"
-) &
-CODEX_PID=$!
-echo "$CODEX_PID" > .dual-ai-collab/logs/task-${TASK_NUM}.pid
+要求：严格按照设计规范实现，确保 UI 还原度、响应式适配、无障碍访问。"
 ```
 
 4. Codex 完成后，Claude 再次调用 `/ui-ux-pro-max` skill 审查前端代码是否符合设计方案
@@ -240,6 +230,8 @@ echo "$CODEX_PID" > .dual-ai-collab/logs/task-${TASK_NUM}.pid
 
 ```bash
 bash "$SKILL_DIR/scripts/detect_stall.sh" XXX "$CODEX_PID"
+# 或通过执行器查询运行状态：
+bash "$SKILL_DIR/scripts/run_task.sh" status XXX
 ```
 
 > 检测逻辑：进程存活检查（kill -0）+ 文件变动检测（基于任务级阈值）+ 日志增长比较（状态文件持久化）
@@ -250,11 +242,42 @@ bash "$SKILL_DIR/scripts/detect_stall.sh" XXX "$CODEX_PID"
 2. 任务板中的 `**执行级别**`（`quick=3m`、`normal=5m`、`heavy=10m`）
 3. 未配置时默认 `3m`
 
-判定规则：连续 3 次 STALLED → kill 进程，回退任务为 OPEN，跳到下一个任务。轮询间隔 60 秒。
+判定规则：连续 3 次 STALLED → 先尝试 `codex:rescue` agent 诊断（可选），如仍无法恢复则 kill 进程，回退任务为 OPEN，跳到下一个任务。轮询间隔 60 秒。
 
-#### 6.6 执行循环
+**卡死降级策略（可选）**：
 
-对每个 OPEN 任务自动循环：领取任务 → 更新 IN_PROGRESS → 后台启动 Codex → 更新 checkpoint → 轮询活跃度 → 成功更新 DONE / 卡死回退 OPEN → 自动继续下一个任务。
+当 direct backend 连续卡死或失败时，优先按 superpowers 的 `systematic-debugging` 思路做根因调查；如果该 skill 不可用，再降级调用 `codex:rescue` agent：
+- 先做 Phase 1：收集日志尾部、最近改动、失败现象，不急着重试
+- 判断属于环境问题 / 任务过大 / 上下文缺失 / 真正代码缺陷中的哪一类
+- 能修复前置条件就先修复，再决定重试
+- 无法诊断时，再 kill + 回退 OPEN + 通知用户
+
+最小执行材料：
+- 读取任务日志 `.dual-ai-collab/logs/task-XXX.log` 的尾部
+- 当前任务描述与验收标准
+- 最近一次失败/卡死前后的关键输出
+
+兜底方式：
+- 让 rescue agent 分析失败原因并给出修复建议
+- 根据诊断结果决定：缩小任务范围重试 / 跳过 / 通知用户
+
+#### 6.6 验证门控
+
+如果任务板的 `### 验收标准` 中包含带反引号的可执行命令，Claude 必须在任务退出码为 0 后运行自动验证：
+
+```bash
+bash "$SKILL_DIR/scripts/verify_task.sh" run "$TASK_NUM"
+```
+
+- 全部通过 → 才允许把任务更新为 `DONE`
+- 任一命令失败 → 视为任务未完成，回退为 `OPEN` 或进入修复
+- 没有可执行验收命令 → 脚本返回 `NO_VERIFICATION_COMMANDS`，此时应补齐任务板或转为人工审查
+
+> 只会自动执行带反引号的命令，例如：`- [ ] \`bash tests/run_all_tests.sh\` 全部通过`
+
+#### 6.7 执行循环
+
+对每个 OPEN 任务自动循环：领取任务 → 更新 IN_PROGRESS → 后台启动 Codex → 更新 checkpoint → 轮询活跃度 → 成功后运行验收命令 → 验证通过再更新 DONE / 卡死回退 OPEN → 自动继续下一个任务。
 
 每个任务完成后更新 checkpoint 并报告进度：
 ```bash
@@ -276,10 +299,13 @@ bash "$SKILL_DIR/scripts/write_checkpoint.sh" developing current_task=XXX comple
 # 查找可并行任务
 bash "$SKILL_DIR/scripts/select_next_task.sh" --parallel
 
-# 并行启动（每个任务独立后台进程）
-codex exec -C "$(pwd)" --full-auto "执行任务 #001：[描述]" > .dual-ai-collab/logs/task-001.log 2>&1 &
-codex exec -C "$(pwd)" --full-auto "执行任务 #003：[描述]" > .dual-ai-collab/logs/task-003.log 2>&1 &
-wait
+# 并行启动（每个任务通过执行器启动）
+bash "$SKILL_DIR/scripts/run_task.sh" start 001 "执行任务 #001：[描述]"
+bash "$SKILL_DIR/scripts/run_task.sh" start 003 "执行任务 #003：[描述]"
+
+# 轮询状态
+bash "$SKILL_DIR/scripts/run_task.sh" status 001
+bash "$SKILL_DIR/scripts/run_task.sh" status 003
 ```
 
 某个任务失败时用 `update_task_status.sh` 回退为 OPEN，不影响其他 Worker。所有并行任务完成后统一进行审计。
@@ -296,38 +322,56 @@ wait
 bash "$SKILL_DIR/scripts/write_checkpoint.sh" auditing
 ```
 
-### 审计第一轮：Codex 代码审查
+### 审计第一轮：Spec Compliance Review
 
-对每个 DONE 任务，后台启动 Codex 进行代码审查：
+优先使用 superpowers 的 `spec-reviewer` 方法论检查“是不是按任务描述和验收标准做了”。如果没有 superpowers 环境，则沿用当前 Codex 审查方式，但输出格式必须贴近 spec compliance review：
 
 ```bash
-codex exec -C "$(pwd)" --full-auto "你是资深代码审查员，审查任务 #XXX 的实现：
+bash "$SKILL_DIR/scripts/run_task.sh" start "audit-${TASK_NUM}" \
+  "你是规范符合性审查员，审查任务 #XXX 的实现：
 任务描述：[描述]
 相关文件：[文件列表]
 验收标准：[验收标准]
 
-请检查：功能符合性、代码质量、安全性、性能、边界情况。
-输出格式：评分(1-10)、PASS/FAIL、问题列表、改进建议。" \
-  > ".dual-ai-collab/logs/audit-${TASK_NUM}-codex.log" 2>&1
+请检查：是否完成任务目标、是否覆盖验收标准、是否存在遗漏实现、是否有需要人工确认的模糊点。
+输出格式：评分(1-10)、PASS/FAIL、Blocking Issues、Missing Coverage、Need User Confirmation。"
 ```
 
+> 如果具备 superpowers 环境，优先用其 `spec-reviewer` prompt/skill 作为第一轮审查模板。
+
 Codex 审查完成后：
-- 将审查结果保存到 `planning/audit-reports/task-XXX-codex-review.md`
+- 将结果保存到 `planning/audit-reports/task-XXX-spec-review.md`
 - 更新任务板，添加 **Codex 审查状态**字段（PASS / FAIL）
 
-### 审计第二轮：Claude 综合审计
+### 审计第二轮：Code Quality Review
 
-Claude 读取以下内容进行综合判定：
-1. Codex 的审查报告
+优先使用 superpowers 的 `code-quality-reviewer` 方法论检查“做得好不好”，重点看结构、可维护性、边界、验证缺口。若没有 superpowers 环境，则由 Claude 或 Codex 按同一关注点完成第二轮。
+
+第二轮必须读取：
+1. 第一轮规范符合性审查结果
 2. 需求规范文档
 3. 实际代码实现
+
+输出重点：
+- 代码质量与维护性
+- 风险边界和回归风险
+- 测试/验证缺口
+- 是否适合直接进入最终判定
+
+### 审计第三轮：Claude 综合判定
+
+Claude 读取以下内容进行综合判定：
+1. 第一轮 spec compliance review
+2. 第二轮 code quality review
+3. 需求规范文档
+4. 实际代码实现
 
 综合判定后：
 - 更新任务板 **Claude 审查状态**字段（VERIFIED / REJECTED）
 - 写入综合审计报告到 `planning/audit-reports/task-XXX-final-review.md`
-- 报告中包含 Codex 审查结果 + Claude 补充意见
+- 报告中包含规范符合性结论 + 代码质量结论 + Claude 补充意见
 
-### 审计第三轮：自动修复循环
+### 审计第四轮：自动修复循环
 
 REJECTED 的任务进入自动修复：
 
@@ -335,9 +379,10 @@ REJECTED 的任务进入自动修复：
 bash "$SKILL_DIR/scripts/write_checkpoint.sh" fixing fix_round=N
 ```
 
-1. Claude 将审计报告（含 Codex + Claude 双方意见）整理为修复指令
-2. Codex 后台执行修复，读取审计报告中的具体问题和建议
-3. 修复完成后重置审查状态，重新进入审计第一轮
+1. Claude 将审计报告（含规范符合性 + 代码质量 + Claude 判定）整理为修复指令
+2. 如有 superpowers 环境，优先使用 `receiving-code-review` 的处理方式，把问题按严重度和可执行动作整理后再交给 Codex
+3. Codex 后台执行修复，读取审计报告中的具体问题和建议
+4. 修复完成后重置审查状态，重新进入审计第一轮
 4. 修复上限 3 次，超过则标记 FAILED 通知用户人工介入
 
 ### 任务板审计字段
@@ -371,11 +416,17 @@ bash "$SKILL_DIR/scripts/summarize_progress.sh"
 # 查看 checkpoint 状态
 cat .dual-ai-collab/checkpoints/state.json 2>/dev/null || echo "无活跃流程"
 
-# 查看 Codex 进程
+# 查看特定任务的运行状态（通过执行器）
+bash "$SKILL_DIR/scripts/run_task.sh" status XXX
+
+# 查看 Codex 进程（兼容方式）
 pgrep -f "codex exec" && echo "Codex 运行中" || echo "无 Codex 进程"
 
 # 查看任务日志
 tail -n 20 .dual-ai-collab/logs/task-*.log 2>/dev/null
+
+# 终止特定任务
+bash "$SKILL_DIR/scripts/run_task.sh" stop XXX
 ```
 
 ---
@@ -385,7 +436,7 @@ tail -n 20 .dual-ai-collab/logs/task-*.log 2>/dev/null
 触发词："生成报告"、"查看进度"、"项目进度"
 
 ```bash
-bash "$SKILL_DIR/scripts/summarize_progress.sh"
+bash "$SKILL_DIR/scripts/summarize_progress.sh" --report
 ```
 
 统计各状态任务数、完成率、审计通过率、预估剩余时间，写入 `planning/progress-reports/YYYYMMDD-HHMMSS-progress.md`。
@@ -412,9 +463,10 @@ bash "$SKILL_DIR/scripts/summarize_progress.sh"
 
 常见问题快速处理：
 - **Codex 未安装**：`npm install -g @openai/codex-cli`
-- **任务卡在 IN_PROGRESS**：`sed -i 's/\*\*状态\*\*: IN_PROGRESS/\*\*状态\*\*: OPEN/g' planning/codex-tasks.md`
+- **任务卡在 IN_PROGRESS**：`bash "$SKILL_DIR/scripts/run_task.sh" stop XXX` 终止后回退状态
 - **流程中断恢复**：重新触发 Skill，自动检测 checkpoint 恢复
 - **清理状态**：`rm -f .dual-ai-collab/checkpoints/state.json`
+- **Codex 连续失败**：使用 `codex:rescue` agent 诊断失败原因
 
 ---
 
