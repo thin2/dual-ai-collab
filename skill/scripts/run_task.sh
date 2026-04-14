@@ -16,11 +16,11 @@ case "$ACTION" in
         ;;
     status)
         shift
-        exec python3 "$SCRIPT_DIR/task_manager.py" run-status "$@"
+        exec python3 "$SCRIPT_DIR/run_task.py" status "$@"
         ;;
     stop)
         shift
-        exec python3 "$SCRIPT_DIR/task_manager.py" run-stop "$@"
+        exec python3 "$SCRIPT_DIR/run_task.py" stop "$@"
         ;;
     *)
         echo "用法: bash run_task.sh <start|status|stop> ..." >&2
