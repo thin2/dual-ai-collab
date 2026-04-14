@@ -6,16 +6,22 @@
 npm install -g @openai/codex-cli
 ```
 
+如果暂时不想安装，也可以继续：
+
+- 让 Claude 进入 `Claude-only` 模式
+- Claude 直接按任务板同步实现任务
+- 不使用后台 worker、并行执行和 `codex:rescue`
+
 ## 问题 2：任务一直处于 IN_PROGRESS
 
 先尝试通过执行器终止并回退：
 ```bash
 # 查询运行状态
-bash "$SKILL_DIR/scripts/run_task.sh" status XXX
+python3 "$SKILL_DIR/scripts/run_task.py" status XXX
 # 终止运行
-bash "$SKILL_DIR/scripts/run_task.sh" stop XXX
+python3 "$SKILL_DIR/scripts/run_task.py" stop XXX
 # 回退状态
-bash "$SKILL_DIR/scripts/update_task_status.sh" XXX OPEN
+python3 "$SKILL_DIR/scripts/task_manager.py" update XXX OPEN
 ```
 
 批量回退所有 IN_PROGRESS 任务（兜底方式）：
@@ -35,10 +41,10 @@ cat .dual-ai-collab/checkpoints/state.json
 活跃度检测会自动发现并处理。手动检查：
 ```bash
 # 通过执行器查询状态
-bash "$SKILL_DIR/scripts/run_task.sh" status XXX
+python3 "$SKILL_DIR/scripts/run_task.py" status XXX
 
 # 通过执行器终止
-bash "$SKILL_DIR/scripts/run_task.sh" stop XXX
+python3 "$SKILL_DIR/scripts/run_task.py" stop XXX
 
 # 兼容方式：查看 Codex 进程
 pgrep -f "codex exec" && echo "进程存在" || echo "无 Codex 进程"

@@ -65,8 +65,8 @@
 
 ```markdown
 ### 验收标准
-- [ ] `bash tests/run_all_tests.sh` 全部通过
-- [ ] `python3 -c "import mymodule"` 不报错
+- [ ] `python skill/scripts/cli.py summary` 可正常执行
+- [ ] `python -c "import mymodule"` 不报错
 - [ ] 页面功能符合产品要求
 ```
 
@@ -75,6 +75,7 @@
 - 脚本只会提取带反引号的命令，例如 `` `bash tests/run_all_tests.sh` ``
 - 纯文字验收标准会被保留给人工审查，但不会被自动执行
 - 如果一个任务没有任何可执行验收命令，`verify_task.sh run` 会返回 `NO_VERIFICATION_COMMANDS`
+- 优先使用 `python`、`npm`、`pytest` 这类跨平台命令；显式写 `bash xxx.sh` 时，Windows 需要额外安装 Git Bash 或 WSL
 
 ## 依赖任务字段说明
 

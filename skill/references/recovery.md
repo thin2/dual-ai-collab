@@ -29,11 +29,11 @@
 |-------|----------|-----------|
 | `interview` | 读取已收集信息，继续访谈 | `state.json` |
 | `spec_generated` | 跳到第 4 步（拆分任务） | `state.json` + `spec_file` |
-| `tasks_created` | 跳到第 5 步（等待用户审查） | `state.json` + `planning/codex-tasks.md` |
-| `user_approved` | 跳到第 6 步（启动开发） | `state.json` + `planning/codex-tasks.md` |
-| `developing` | 继续执行 OPEN/IN_PROGRESS 任务 | `state.json` + `planning/codex-tasks.md` |
-| `auditing` | 对 DONE 任务继续审计 | `state.json` + `planning/codex-tasks.md` + `planning/audit-reports/` |
-| `fixing` | 对 REJECTED 任务继续修复 | `state.json` + `planning/codex-tasks.md` + `planning/audit-reports/` |
+| `tasks_created` | 跳到第 5 步（等待用户审查） | `state.json` + `planning/codex-tasks.md`/`planning/tasks.json` |
+| `user_approved` | 跳到第 6 步（启动开发） | `state.json` + `planning/codex-tasks.md`/`planning/tasks.json` |
+| `developing` | 继续执行 OPEN/IN_PROGRESS 任务 | `state.json` + `planning/codex-tasks.md`/`planning/tasks.json` |
+| `auditing` | 对 DONE 任务继续审计 | `state.json` + `planning/codex-tasks.md`/`planning/tasks.json` + `planning/audit-reports/` |
+| `fixing` | 对 REJECTED 任务继续修复 | `state.json` + `planning/codex-tasks.md`/`planning/tasks.json` + `planning/audit-reports/` |
 
 ---
 
@@ -47,7 +47,7 @@
 ```
 🔄 检测到中断的流程，正在恢复...
 📍 中断阶段：[phase]
-📋 任务板：planning/codex-tasks.md
+📋 任务板：planning/codex-tasks.md（真相源：planning/tasks.json）
 📊 进度：[completed_tasks]/[total_tasks]
 ⏩ 继续执行...
 ```
@@ -60,12 +60,13 @@
 
 ### developing 阶段
 - 检查任务板中有无 IN_PROGRESS 的任务
-- 有 → 通过执行器查询运行状态：`bash "$SKILL_DIR/scripts/run_task.sh" status XXX`
+- 有 → 通过执行器查询运行状态：`python3 "$SKILL_DIR/scripts/run_task.py" status XXX`
   - running → 继续轮询
   - success → 更新状态为 DONE
   - failed/stopped/not_found → 回退为 OPEN
   - 兼容方式：`pgrep -f "codex exec"` 检查进程
 - 无 → 选择下一个 OPEN 任务继续
+- 如果当前是 Claude-only 模式：不查询后台进程，直接继续同步执行下一个任务
 
 ### auditing / fixing 阶段
 - 读取任务板，找到需要审计/修复的任务继续处理
@@ -78,7 +79,7 @@
 如果 `state.json` 不是有效 JSON：
 
 1. 备份损坏文件：`cp state.json state.json.corrupted`
-2. 检查 `planning/codex-tasks.md` 是否存在
+2. 检查 `planning/codex-tasks.md` 或 `planning/tasks.json` 是否存在
    - 存在 → 根据任务板状态推断当前阶段
    - 不存在 → 从第 1 步重新开始
 3. 创建新的 checkpoint
