@@ -4,130 +4,95 @@
 ################################################################################
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$SCRIPT_DIR/test_helpers.sh"
 
-# 从 codex-auto-worker.sh 提取统计逻辑
-count_by_status() {
-    local status="$1"
-    local task_file="$2"
-    awk "/\\*\\*状态\\*\\*: ${status}|状态: ${status}/ {count++} END {print count+0}" "$task_file"
-}
-
-count_total() {
+summary_output() {
     local task_file="$1"
-    awk '/## 任务 #/ {count++} END {print count+0}' "$task_file"
+    (cd "$TEST_DIR" && bash "$PROJECT_DIR/skill/scripts/summarize_progress.sh" "$task_file" 2>&1)
 }
 
-# ═══════════════════════════════════════════
-# 测试开始
-# ═══════════════════════════════════════════
+value_of() {
+    local output="$1"
+    local label="$2"
+    echo "$output" | awk -F': ' -v label="$label" '$1 == label {print $2; exit}'
+}
 
 describe "统计报告输出测试"
 
-# --- 测试 1：总任务数 ---
 setup_test_env
 create_test_taskboard
-
 it "应正确计算总任务数"
-result=$(count_total "$TASK_BOARD")
-assert_equals "5" "$result"
-
+result=$(summary_output "$TASK_BOARD")
+assert_equals "5" "$(value_of "$result" "总任务")"
 teardown_test_env
 
-# --- 测试 2：OPEN 任务数 ---
 setup_test_env
 create_test_taskboard
-
 it "应正确计算 OPEN 任务数"
-result=$(count_by_status "OPEN" "$TASK_BOARD")
-assert_equals "3" "$result"
-
+result=$(summary_output "$TASK_BOARD")
+assert_equals "3" "$(value_of "$result" "OPEN")"
 teardown_test_env
 
-# --- 测试 3：DONE 任务数 ---
 setup_test_env
 create_test_taskboard
-
 it "应正确计算 DONE 任务数"
-result=$(count_by_status "DONE" "$TASK_BOARD")
-assert_equals "1" "$result"
-
+result=$(summary_output "$TASK_BOARD")
+assert_equals "1" "$(value_of "$result" "DONE")"
 teardown_test_env
 
-# --- 测试 4：VERIFIED 任务数 ---
 setup_test_env
 create_test_taskboard
-
 it "应正确计算 VERIFIED 任务数"
-result=$(count_by_status "VERIFIED" "$TASK_BOARD")
-assert_equals "1" "$result"
-
+result=$(summary_output "$TASK_BOARD")
+assert_equals "1" "$(value_of "$result" "VERIFIED")"
 teardown_test_env
 
-# --- 测试 5：IN_PROGRESS 初始为 0 ---
 setup_test_env
 create_test_taskboard
-
 it "IN_PROGRESS 初始应为 0"
-result=$(count_by_status "IN_PROGRESS" "$TASK_BOARD")
-assert_equals "0" "$result"
-
+result=$(summary_output "$TASK_BOARD")
+assert_equals "0" "$(value_of "$result" "IN_PROGRESS")"
 teardown_test_env
 
-# --- 测试 6：空任务板统计 ---
 setup_test_env
 create_empty_taskboard
-
 it "空任务板总数应为 0"
-result=$(count_total "$TASK_BOARD")
-assert_equals "0" "$result"
-
+result=$(summary_output "$TASK_BOARD")
+assert_equals "0" "$(value_of "$result" "总任务")"
 teardown_test_env
 
-# --- 测试 7：空任务板 OPEN 数 ---
 setup_test_env
 create_empty_taskboard
-
 it "空任务板 OPEN 应为 0"
-result=$(count_by_status "OPEN" "$TASK_BOARD")
-assert_equals "0" "$result"
-
+result=$(summary_output "$TASK_BOARD")
+assert_equals "0" "$(value_of "$result" "OPEN")"
 teardown_test_env
 
-# --- 测试 8：全部完成任务板统计 ---
 setup_test_env
 create_all_done_taskboard
-
 it "全部完成任务板 OPEN 应为 0"
-result=$(count_by_status "OPEN" "$TASK_BOARD")
-assert_equals "0" "$result"
-
+result=$(summary_output "$TASK_BOARD")
+assert_equals "0" "$(value_of "$result" "OPEN")"
 teardown_test_env
 
-# --- 测试 9：统计输出无脏值（单行纯数字） ---
 setup_test_env
 create_test_taskboard
-
 it "统计输出应为单行纯数字（无脏值）"
-result=$(count_by_status "OPEN" "$TASK_BOARD")
-# 确保结果是纯数字
-if [[ "$result" =~ ^[0-9]+$ ]]; then
+result=$(summary_output "$TASK_BOARD")
+value=$(value_of "$result" "OPEN")
+if [[ "$value" =~ ^[0-9]+$ ]]; then
     pass
 else
-    fail "输出不是纯数字: [$result]"
+    fail "输出不是纯数字: [$value]"
 fi
-
 teardown_test_env
 
-# --- 测试 10：REJECTED 初始为 0 ---
 setup_test_env
 create_test_taskboard
-
 it "REJECTED 初始应为 0"
-result=$(count_by_status "REJECTED" "$TASK_BOARD")
-assert_equals "0" "$result"
-
+result=$(summary_output "$TASK_BOARD")
+assert_equals "0" "$(value_of "$result" "REJECTED")"
 teardown_test_env
 
-# 打印总结
 print_summary

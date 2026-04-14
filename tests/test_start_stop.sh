@@ -110,9 +110,13 @@ assert_exit_code "0" "$exit_code"
 teardown_test_env
 
 # --- 测试 9：Skill 文件包含任务板格式定义 ---
-it "Skill 文件应包含任务板格式定义"
+it "Skill 文件应包含任务板或真相源说明"
 result=$(cat "$PROJECT_DIR/skill/dual-ai-collab.md")
-assert_contains "$result" "任务 #"
+if echo "$result" | grep -qE "tasks.json|codex-tasks.md"; then
+    pass
+else
+    fail "未找到任务板或真相源说明"
+fi
 
 # --- 测试 10：references 目录存在 ---
 it "skill/references/ 目录应存在"
