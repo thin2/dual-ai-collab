@@ -53,26 +53,10 @@ curl -sSL https://raw.githubusercontent.com/thin2/dual-ai-collab/master/skill/du
 
 在 Claude Code 中输入以下任意内容触发：
 
-- `双 AI 协作`、`dual ai`、`codex 协作`
-- `/dual-ai-collab`
+完整协作模式：`双 AI 协作`、`dual ai`、`启动协作`、`继续开发`、`审计代码`
+纯规划模式：`规划`、`planning`、`需求分析`、`任务规划`
 
-## 纯规划技能 (Planning-Only)
-
-如果你只需要规划能力（访谈、规格生成、任务板、审计），不需要执行：
-
-```bash
-python install.py --skill planning
-```
-
-触发词：`规划`、`planning`、`需求分析`、`任务规划`
-
-产出物（specs、tasks.json、codex-tasks.md）与 dual-ai-collab 格式兼容，可以随时切换到 dual-ai-collab 继续执行。
-
-安装两个技能：
-
-```bash
-python install.py --skill both
-```
+纯规划模式只走访谈 → 规格 → 任务板 → 审计 → 确认，不进入执行阶段。产出物可随时用"继续开发"衔接完整协作流程。
 
 ## 工作流程
 
@@ -152,7 +136,7 @@ python skill/scripts/cli.py run start 001 "实现任务" --backend adapter
 ## 项目结构
 
 ```
-install.py                       # 跨平台安装器（支持 --skill dual/planning/both）
+install.py                       # 跨平台安装器
 install.cmd                      # Windows 安装入口
 skill/
 ├── dual-ai-collab.md           # 核心 Skill 文件（安装到 ~/.claude/skills/）
@@ -179,17 +163,6 @@ skill/
     ├── run_task.sh             # 启动/查询/终止单个任务运行
     ├── verify_task.sh          # 提取/执行任务验收命令
     └── summarize_progress.sh   # 进度统计（支持 --report 生成报告）
-planning-skill/                  # 纯规划技能（独立安装）
-├── planning-collab.md          # 规划 Skill 文件
-├── references/                 # 规划专用参考文档
-│   ├── interview.md
-│   ├── task-board.md
-│   └── prompt-templates.md
-└── scripts/                    # 规划专用脚本（无执行器）
-    ├── cli.py
-    ├── task_manager.py
-    ├── tasks_store.py
-    └── platform_utils.py
 tests/                          # Shell 黑盒测试 + Python 单元测试
 ```
 
