@@ -15,7 +15,7 @@ summary_output() {
 value_of() {
     local output="$1"
     local label="$2"
-    echo "$output" | awk -F': ' -v label="$label" '$1 == label {print $2; exit}'
+    echo "$output" | LC_ALL=C awk -F': ' -v label="$label" '$1 == label {print $2; exit}'
 }
 
 describe "进度统计报告测试（v2.1.0）"

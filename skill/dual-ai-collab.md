@@ -43,18 +43,23 @@ python -c "from shutil import which; print('CODEX_OK' if which('codex') else 'CO
 2. 先规划，后开发；规划先审计，再让用户确认。
 3. 任务真相源是 `planning/tasks.json`；`planning/codex-tasks.md` 是渲染视图。
 4. 验收命令必须执行，通过后才可标记 `DONE`（仅完整协作模式）。
-5. 访谈、前端设计、审计都按复杂度分级。
+5. 访谈、审计都按复杂度分级。
 6. 用户可读反馈由 Claude 负责翻译，脚本输出保持程序化。
+7. 流程依赖 grill-me 和 ui-ux-pro-max 都是**可选的**。无这些 skill 时，Claude 用手工方式替代（见各步说明）。
 
 ## 第 1 步：复杂度判断与访谈
 
 先判断复杂度，再决定访谈深度：
-- 简单：2-3 轮。例：修 bug、小按钮、小工具函数。
-- 中等：4-6 轮。例：新页面、一组接口、一个中等模块。
-- 复杂：6-10 轮。例：认证、支付、权限、数据迁移、跨模块重构。
+- 简单：2-3 轮。例：修 bug、小按钮、小工具函数。无需对抗性提问。
+- 中等：4-6 轮。例：新页面、一组接口、一个中等模块。后期可加对抗性提问（grill-me 或 Claude 手工）。
+- 复杂：6-10 轮。例：认证、支付、权限、数据迁移、跨模块重构。中期进入对抗性提问（grill-me 或 Claude 手工）。
 
-复杂度判断模板见 [prompt-templates.md](./references/prompt-templates.md) 1.0
-规则和规格模板见 [interview.md](./references/interview.md)
+**降级方案**：
+- 若有 grill-me：调用对抗性提问 Prompt（见 [grill-me-integration.md](./references/grill-me-integration.md) 第 1 节）
+- 若无 grill-me：Claude 手工执行同等思路的对抗性提问（见 [prompt-templates.md](./references/prompt-templates.md) 1.5）
+
+复杂度判断模板见 [prompt-templates.md](./references/prompt-templates.md) 1.0  
+访谈规则和规格模板见 [interview.md](./references/interview.md)
 
 ## 第 2 步：规格与任务板
 
@@ -66,7 +71,7 @@ python -c "from shutil import which; print('CODEX_OK' if which('codex') else 'CO
 要求：
 - 每个任务 1-3 小时
 - 验收标准尽量可执行
-- 依赖关系明确
+- 依赖关系明确；前后端可按接口契约 Mock 先行时用 `**接口依赖**` + 独立集成任务，见 [execution-optimization.md](./references/execution-optimization.md) 第 3 节
 
 常用命令：
 
@@ -79,7 +84,9 @@ python "<skill-dir>/scripts/cli.py" summary
 
 ## 第 3 步：规划审计与确认
 
-Claude 先主审，必要时让 Codex 只做补漏，不重复整份审计。
+分两个子阶段：
+
+### 3.1 规范符合性审计（Claude 主审）
 
 检查重点：
 - 用户目标覆盖
@@ -88,7 +95,28 @@ Claude 先主审，必要时让 Codex 只做补漏，不重复整份审计。
 - 验收标准可验证性
 - 风险与边界记录
 
-然后让用户明确回复：
+必要时让 Codex 只做补漏，不重复整份审计。
+
+### 3.2 设计质疑（按需深化）
+
+根据复杂度和风险决定是否进入对抗性设计质疑：
+- **简单需求**：跳过，直接用户确认
+- **中等需求**：可选，按需启用
+- **复杂/高风险需求**：推荐启用
+
+**有 grill-me 时**：
+- 调用 grill-me 设计质疑 Prompt（见 [grill-me-integration.md](./references/grill-me-integration.md) 第 2 节）
+- grill-me 输出 5-10 个深度疑虑
+
+**无 grill-me 时**：
+- Claude 手工执行同等思路的设计质疑（见 [prompt-templates.md](./references/prompt-templates.md) 1.3）
+- 输出格式相同，流程相同
+
+设计质疑目的：暴露任务拆分风险、验收标准定性问题、边界情况缺口、依赖关系疑虑。
+
+### 3.3 用户确认
+
+让用户明确回复：
 1. 开始开发
 2. 修改规划
 3. 取消
@@ -141,33 +169,88 @@ python "<skill-dir>/scripts/cli.py" run start XXX "任务提示词" --backend ad
 统一流程：
 1. 领取任务
 2. 更新 `IN_PROGRESS`
-3. 按当前模式实现
-4. 运行验收命令
-5. 通过后更新 `DONE`
-6. 写 checkpoint
+3. **Kickoff Check**：确保任务描述清晰，无歧义
+4. 按当前模式实现
+5. **可选 Midpoint Check**：任务中期检查（高风险任务推荐）
+6. 运行验收命令
+7. 通过后更新 `DONE`
+8. 写 checkpoint
 
 ```bash
 python "<skill-dir>/scripts/cli.py" update XXX IN_PROGRESS
+# 执行前先做 kickoff check（见下方）
 python "<skill-dir>/scripts/cli.py" verify run XXX
 python "<skill-dir>/scripts/cli.py" update XXX DONE
 python "<skill-dir>/scripts/cli.py" checkpoint-write developing current_task=XXX completed_tasks=N
 ```
 
+### 5.1 Kickoff Check（任务启动检查）
+
+在实现前立即做，确保任务理解无误。
+
+**检查清单**（Claude 执行）：
+- 任务目标能一句话说清吗？
+- 相关文件都列了吗？
+- 验收标准是否可验证？有没有定性标准需要改量化？
+- 依赖任务都完成了吗？
+- 技术方案有指导吗？
+
+**发现问题时**：立即询问用户或补充说明，不要硬做。
+
+详见 [execution-optimization.md](./references/execution-optimization.md) 第 1.1 节
+
+### 5.2 Midpoint Check（任务中期检查）
+
+**时机**：可选，当任务预计工时过半或遇到困难时。
+
+**目的**：快速判断是否卡住、卡在哪、怎么处理。
+
+**决策树**：
+- 能 15 分钟解决？→ 给建议，继续
+- 需求歧义？→ 澄清或返工规划
+- 技术困难？→ 提供方案，让用户选
+- 规划有问题？→ 升级为规划审计
+
+详见 [execution-optimization.md](./references/execution-optimization.md) 第 1.2 节
+
 ## 第 6 步：前端设计分级
 
-以下情况必须先调用 `ui-ux-pro-max`：
-- 新页面
-- 新组件体系
-- 新视觉方向
-- 复杂交互 / 动效 / 高信息密度界面
+按任务复杂度灵活判断是否需要专门设计阶段，不强制所有前端任务都走完整流程。
 
-以下情况可直接实现：
-- CSS bug
+### 简单前端任务：直接实现
+
+以下情况可跳过设计阶段，直接进任务板实现：
+- CSS bug 修复
 - 间距、颜色、对齐微调
 - 现有组件的小范围修复
 - 不改变产品视觉方向的改动
+- 表单验证、文案调整、权限控制
 
-模板见 [prompt-templates.md](./references/prompt-templates.md)
+### 中等前端任务：按需设计
+
+新页面、新组件、新交互。判断流程：
+
+1. Claude 读任务描述，判断产品逻辑是否清晰
+2. **有 ui-ux-pro-max 且任务复杂**：调用设计 Prompt（见 ui-ux-pro-max 文档）→ 生成完整设计方案 → 任务板中补充设计文件路径
+3. **无 ui-ux-pro-max 或任务相对简单**：Claude 在任务描述中补充轻量设计说明（文字 + 简图/ASCII 草图 + 样式参考） → 直接实现
+
+### 复杂前端任务：必做设计
+
+以下情况必须做设计（有工具就用工具，没工具就用手工）：
+- 新视觉方向或全新页面组系
+- 复杂交互 / 多级嵌套 / 动效 / 实时反馈
+- 用户研究有重大调整
+- 跨平台适配有特殊要求
+
+**流程**：
+- **有 ui-ux-pro-max**：调用完整设计 Prompt → 生成设计方案 → 任务板中引用
+- **无 ui-ux-pro-max**：Claude 手工设计（文字描述 + 组件草图 + 交互流程 + 样式指南） → 写成 `planning/design/[任务编号]-design.md` → 任务板中引用
+
+### 核心原则
+
+**灵活性优先**：设计决策由产品目标和规划清晰度决定，不是页面数量或 skill 可用性决定。
+
+模板见 [prompt-templates.md](./references/prompt-templates.md) 2.2
 
 ## 第 7 步：活跃度检测与失败处理
 
@@ -192,10 +275,14 @@ python "<skill-dir>/scripts/cli.py" run stop XXX
   - Claude 最终判定
   - 必要时补 Code Quality Review
 - 轻审计：小型 P3、局部 bugfix、工具函数、小样式修复
+  - 可选对抗性代码挑战（grill-me 或 Claude 手工）
   - Claude 快速核验
   - 必要时升级为标准审计
 
-规则见 [audit.md](./references/audit.md)
+REJECTED 后先做根因分类（理解偏差 / 设计缺陷 / 环境 / 技术困难 / 无法修复），按修复决策表处理，最多 3 次。
+任务数 ≥ 5 的项目，审计时同步维护 `planning/defect-patterns.md`，高频模式会提升后续任务的检查和审计强度。
+
+规则见 [audit.md](./references/audit.md)，修复与模式库见 [execution-optimization.md](./references/execution-optimization.md)
 
 ## 第 9 步：恢复与进度
 
