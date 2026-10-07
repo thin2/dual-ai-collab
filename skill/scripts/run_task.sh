@@ -1,7 +1,8 @@
 #!/bin/bash
 # run_task.sh - 启动/查询/终止任务运行（薄封装）
 # 用法:
-#   bash run_task.sh start <任务编号> <提示词> [--backend direct|plugin] [--workdir DIR]
+#   bash run_task.sh start <任务编号> [<提示词> | --prompt-file F] [--backend direct|plugin] [--workdir DIR]
+#                          [--model M] [--effort low|medium|high...] [--sandbox MODE] [--no-structured]
 #   bash run_task.sh status <任务编号>
 #   bash run_task.sh stop <任务编号>
 set -e

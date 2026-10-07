@@ -1,215 +1,419 @@
 # Dual AI Collaboration
 
-> Claude（规划者 / 审计者）+ Codex（执行者）= 轻量但可恢复的双 AI 协作开发流程
+双 AI 协同开发系统 - 多模型智能路由、任务管理和项目分析的完整解决方案。
 
-## 安装
+## ✨ 核心特性
 
-```bash
-# 方法一：克隆仓库后使用跨平台安装器（推荐）
-git clone https://github.com/thin2/dual-ai-collab.git
-cd dual-ai-collab
-python install.py
-```
+- 🤖 **多模型适配器路由** - 根据任务复杂度自动选择最优 AI 模型
+- 📊 **智能任务调度** - 基于优先级、依赖关系和系统资源的智能调度
+- 📈 **任务分析可视化** - 依赖图、关键路径分析、并行机会识别
+- 📝 **任务模板系统** - 快速创建标准化任务
+- 📉 **执行历史追踪** - 完整的任务执行历史和性能分析
+- 🔄 **自动回退机制** - 适配器不可用时自动切换备选方案
+- 🎯 **结构化日志** - JSON 格式日志便于分析和监控
 
-Windows 用户可直接运行：
+## 可恢复会话后端
 
-```bat
-install.cmd
-```
-
-如果你只想手动复制文件，正确目录结构应为：
+新增 `app-server` 后端：保持线程上下文、读取事件、追加指导、中断，以及验收失败后在原会话修复。
+支持显式 `--isolate` 创建独立 Git worktree，CLI 原有后端继续保留。
 
 ```bash
-mkdir -p ~/.claude/skills/dual-ai-collab
-cp dual-ai-collab/skill/dual-ai-collab.md ~/.claude/skills/dual-ai-collab/
-cp -r dual-ai-collab/skill/scripts ~/.claude/skills/dual-ai-collab/
-cp -r dual-ai-collab/skill/references ~/.claude/skills/dual-ai-collab/
+python3 skill/scripts/cli.py run start 001 "实现任务" --backend app-server --isolate
+python3 skill/scripts/cli.py run status 001
+python3 skill/scripts/cli.py run events 001
+# 等执行成功，再运行；失败时启动同会话修复一次，随后需再次验收
+python3 skill/scripts/cli.py run complete 001 --repair
 ```
 
-不要执行下面这种复制方式，它会多出一层 `skill/` 目录：
+`--isolate` 需要干净的 Git 工作区。真实 Codex 0.160.1 已跑通执行、失败验收、原线程修复、再次验收；
+完整命令、权限与恢复边界见 [会话后端说明](./docs/session-backend.md)。
+
+## 🚀 快速开始
+
+### 安装
 
 ```bash
-cp -r dual-ai-collab/skill ~/.claude/skills/dual-ai-collab
+# Python 3.9+，在仓库根目录执行
+python3 -m pip install -e '.[analytics,test]'
 ```
 
-方法二：只下载主文件（不推荐，缺 `scripts/` 和 `references/`）
+基础任务管理、执行、验收和历史查询仅使用 Python 标准库，可直接运行脚本。
+`analytics` 提供调度分析所需的 `psutil`，`test` 提供 pytest；缺少分析依赖不会影响基础命令。
+
+### 初始化项目
 
 ```bash
-mkdir -p ~/.claude/skills
-curl -sSL https://raw.githubusercontent.com/thin2/dual-ai-collab/master/skill/dual-ai-collab.md -o ~/.claude/skills/dual-ai-collab.md
+python3 skill/scripts/cli.py init
 ```
 
-> 注意：方法二只下载主文件，skill 运行时仍依赖 `scripts/` 和 `references/`。建议使用 `python install.py` 完整安装。
+### 配置模型路由
 
-## 当前状态
+编辑 `.dual-ai-collab/model-routing.json`：
 
-当前 skill 已可实际使用：
-
-- 默认 `direct` backend：通过 `codex` 后台执行任务
-- 无 `codex` 时：可切换到 `Claude-only`
-- 新增 `adapter` backend：可通过本地 CLI 适配器执行，当前内置 `claude-cli`
-
-## 使用
-
-在 Claude Code 中输入以下任意内容触发：
-
-完整协作模式：`双 AI 协作`、`dual ai`、`启动协作`、`继续开发`、`审计代码`
-纯规划模式：`规划`、`planning`、`需求分析`、`任务规划`
-
-纯规划模式只走访谈 → 规格 → 任务板 → 审计 → 确认，不进入执行阶段。产出物可随时用"继续开发"衔接完整协作流程。
-
-## 工作流程
-
+```json
+{
+  "model_routing": {
+    "quick": {
+      "adapter": "deepseek-cli",
+      "reason": "快速任务使用轻量模型"
+    },
+    "normal": {
+      "adapter": "claude-cli",
+      "reason": "常规任务使用平衡模型"
+    },
+    "heavy": {
+      "adapter": "codex",
+      "reason": "复杂任务使用强大模型"
+    }
+  },
+  "fallback_chain": {
+    "deepseek-cli": ["claude-cli", "codex"],
+    "claude-cli": ["codex"],
+    "codex": []
+  },
+  "adapter_commands": {
+    "deepseek-cli": ["/path/to/your-codex-compatible-wrapper"],
+    "claude-cli": ["claude"],
+    "codex": ["codex", "exec", "-"]
+  }
+}
 ```
-用户需求 → Claude 深入访谈 → 生成需求规范 + 任务板
-    → Claude 先审计规划，必要时由 Codex 补漏
-    → 用户确认规划
-    → Codex 异步开发（后台执行 + 活跃度检测 + 验证门控）
-    → 分级审计（轻量核验 / 标准审计 / 完整审计）
-    → 按需返工修复 → 项目完成
-```
 
-当前版本的关键原则：
-
-- 规划文档必须先审计，再交给用户确认，确认后才进入开发。
-- 前端任务按复杂度分级：新页面/复杂交互先做设计，小修小补可直接实现。
-- 任务完成后自动运行验收标准中的可执行命令，验证通过才标记 DONE。
-- 审计按复杂度分级：高风险任务走完整审计，低风险任务走轻量核验。
-- 卡死恢复优先做根因调查（systematic-debugging 思路），再决定重试或跳过。
-- Skill 支持 checkpoint 恢复，长流程在对话压缩或中断后可以继续。
-- 卡死检测支持任务级 `执行级别` 和 `卡死阈值`，避免长任务被过早判定失败。
-- Shell 脚本为薄封装，核心逻辑由 Python 实现（并发安全、原子写入、状态机解析）。
-- 当 Codex CLI 不可用时，流程会降级为 `Claude-only` 模式，由 Claude 直接按任务板执行和验证。
-- 执行器支持 `direct` 和 `adapter` 两种后台模型；`adapter` 默认可接 `claude-cli`。
-- 访谈按复杂度分级：简单需求 2-3 轮，中等需求 4-6 轮，复杂需求 6-10 轮。
-
-## 跨平台使用
-
-仓库现在同时支持 Linux/macOS 和 Windows，但推荐把 `Python` 入口视为正式接口：
+### 基本使用
 
 ```bash
-# Linux / macOS / Windows（PowerShell、cmd 都可）
-python skill/scripts/cli.py init
-python skill/scripts/cli.py select
-python skill/scripts/cli.py update 001 DONE
-python skill/scripts/cli.py run start 001 "实现任务"
-python skill/scripts/cli.py run start 001 "实现任务" --backend adapter
-python skill/scripts/cli.py verify run 001
+# 选择下一个任务
+python3 skill/scripts/cli.py select
+
+# 启动任务（使用适配器路由）
+python3 skill/scripts/cli.py run start 001 "实现用户登录功能" --backend adapter
+
+# 查看任务状态
+python3 skill/scripts/cli.py run status 001
+
+# 生成依赖图
+python3 skill/scripts/cli.py visualize -o deps.mmd
+
+# 查看调度建议
+python3 skill/scripts/cli.py schedule
+
+# 查看执行历史
+python3 skill/scripts/cli.py history
 ```
 
-如果你想显式使用 `adapter` backend：
+## 📚 完整文档
+
+详细使用教程请查看：**[TUTORIAL.md](./TUTORIAL.md)**
+
+教程包含：
+- 多模型适配器配置和使用
+- 任务管理完整流程
+- 依赖可视化和分析
+- 智能调度系统
+- 模板系统使用
+- 故障排查指南
+- 最佳实践建议
+
+## 🏗️ 项目架构
+
+```
+dual-ai-collab/
+├── skill/
+│   ├── scripts/
+│   │   ├── cli.py                    # 统一 CLI 入口
+│   │   ├── task_manager.py           # 任务管理核心
+│   │   ├── run_task.py               # 任务执行引擎
+│   │   ├── model_router.py           # 模型路由器
+│   │   ├── task_history.py           # 执行历史追踪
+│   │   ├── task_visualization.py     # 依赖可视化
+│   │   ├── task_scheduler.py         # 智能调度器
+│   │   ├── task_templates.py         # 任务模板
+│   │   └── task_analytics.py         # 分析工具 CLI
+│   └── references/                   # 参考文档
+├── tests/                            # 测试套件
+├── .dual-ai-collab/                  # 项目数据目录
+│   ├── config.json                   # 基础配置
+│   ├── model-routing.json            # 模型路由配置
+│   ├── logs/                         # 执行日志
+│   ├── history/                      # 历史记录
+│   └── checkpoints/                  # 检查点数据
+├── planning/                         # 任务板和规范
+│   ├── codex-tasks.md                # 任务板（Markdown 视图）
+│   └── tasks.json                    # 任务数据（真相源）
+├── README.md                         # 本文件
+├── TUTORIAL.md                       # 完整使用教程
+└── IMPROVEMENTS.md                   # 改进历史
+```
+
+## 🎯 主要功能模块
+
+### 1. 多模型适配器路由
+
+根据任务执行级别自动选择最优模型：
+
+- **quick** (3分钟) → 轻量模型 (DeepSeek)
+- **normal** (5分钟) → 平衡模型 (Claude)
+- **heavy** (10分钟) → 强大模型 (Codex)
+
+启动前按可用性和权限模式回退；执行已开始后的失败不会自动切换工具重跑。
+
+### 2. 智能任务调度
+
+基于多个因素的智能调度：
+
+- 任务优先级权重
+- 依赖关系深度
+- 历史成功率
+- 系统资源使用
+- 预估执行时间
+
+### 3. 任务分析可视化
+
+- **依赖图生成**：Mermaid / Graphviz DOT 格式
+- **关键路径分析**：识别最长依赖链
+- **并行机会识别**：发现可并行执行的任务组
+- **循环依赖检测**：自动检测并报告
+
+### 4. 执行历史追踪
+
+- 完整的任务执行记录
+- 性能统计和趋势分析
+- 适配器使用统计
+- 成功率和失败分析
+
+### 5. 任务模板系统
+
+预定义模板：
+
+- `feature` - 新功能开发
+- `bugfix` - Bug 修复
+- `refactor` - 代码重构
+- `test` - 测试编写
+- `docs` - 文档编写
+- `optimization` - 性能优化
+
+支持从需求文档自动生成任务板。
+
+## 📊 使用示例
+
+### 完整工作流
 
 ```bash
-# Linux / macOS
-export DUAL_AI_ADAPTER=claude-cli
-python skill/scripts/cli.py run start 001 "实现任务" --backend adapter
+# 1. 初始化并配置
+python3 skill/scripts/cli.py init
+
+# 2. 从模板创建任务
+python3 skill/scripts/cli.py templates create feature 001 --add \
+  --var feature_name="用户登录API"
+
+# 3. 生成依赖分析
+python3 skill/scripts/cli.py analyze
+
+# 4. 查看调度建议
+python3 skill/scripts/cli.py schedule
+
+# 5. 执行任务
+python3 skill/scripts/cli.py select
+python3 skill/scripts/cli.py run start 001 "实现登录API" --backend adapter
+
+# 6. 监控和分析
+python3 skill/scripts/cli.py run status 001
+python3 skill/scripts/cli.py history
 ```
 
-```powershell
-# PowerShell
-$env:DUAL_AI_ADAPTER="claude-cli"
-python skill/scripts/cli.py run start 001 "实现任务" --backend adapter
-```
-
-也可使用自定义命令适配器：
+### 生成项目报告
 
 ```bash
-# Linux / macOS
-export DUAL_AI_ADAPTER=custom-json
-export DUAL_AI_CUSTOM_CMD_JSON='["my-runner", "--prompt", "{prompt}"]'
-python skill/scripts/cli.py run start 001 "实现任务" --backend adapter
+# 依赖可视化
+python3 skill/scripts/cli.py visualize -o docs/dependencies.mmd
+
+# 依赖分析报告
+python3 skill/scripts/cli.py analyze > docs/analysis.md
+
+# 调度建议报告
+python3 skill/scripts/cli.py schedule > docs/schedule.md
+
+# 执行历史报告
+python3 skill/scripts/cli.py history > docs/history.md
+
+# 任务摘要
+python3 skill/scripts/cli.py summary > docs/summary.md
 ```
 
-```powershell
-# PowerShell
-$env:DUAL_AI_ADAPTER="custom-json"
-$env:DUAL_AI_CUSTOM_CMD_JSON='["my-runner", "--prompt", "{prompt}"]'
-python skill/scripts/cli.py run start 001 "实现任务" --backend adapter
-```
+## 🧪 测试
 
-兼容入口说明：
-
-- Linux/macOS：现有 `skill/scripts/*.sh` 仍然可用
-- Windows：新增 `skill/scripts/*.cmd`，也可直接运行 `skill\\scripts\\cli.cmd`
-- 如果验收命令显式写成 `bash xxx.sh`，Windows 需要安装 Git Bash 或 WSL；更推荐把任务板里的验收命令写成 `python`、`npm`、`pytest` 这类跨平台命令
-
-## 项目结构
-
-```
-install.py                       # 跨平台安装器
-install.cmd                      # Windows 安装入口
-skill/
-├── dual-ai-collab.md           # 核心 Skill 文件（安装到 ~/.claude/skills/）
-├── references/                 # 参考文档（按需加载）
-│   ├── interview.md            # 访谈策略和规范模板
-│   ├── task-board.md           # 任务板格式规范
-│   ├── audit.md                # 审计规则和报告格式
-│   ├── prompt-templates.md     # 阶段化提示词模板
-│   ├── recovery.md             # 对话压缩/中断后的恢复指引
-│   ├── grill-me-integration.md # 对抗性质疑集成（grill-me 可选，缺失时 Claude 手工执行）
-│   ├── execution-optimization.md # 任务检查点、修复决策、Mock 并行、缺陷模式库
-│   └── troubleshooting.md      # 故障排查
-└── scripts/                    # 辅助脚本
-    ├── cli.py                  # 跨平台统一入口
-    ├── platform_utils.py       # 跨平台锁、进程、shell 工具
-    ├── task_manager.py         # 任务管理核心（状态管理、解析、并发安全）
-    ├── run_task.py             # 执行器抽象层（direct / adapter、run record、后台 worker）
-    ├── verify_task.py          # 验收命令提取与执行
-    ├── init_env.sh             # 环境初始化
-    ├── init_env.cmd            # Windows 包装入口
-    ├── check_checkpoint.sh     # checkpoint 恢复检查
-    ├── write_checkpoint.sh     # checkpoint 写入/更新
-    ├── select_next_task.sh     # 任务领取（支持 --parallel）
-    ├── update_task_status.sh   # 状态更新
-    ├── detect_stall.sh         # Codex 活跃度检测（支持任务级阈值）
-    ├── run_task.sh             # 启动/查询/终止单个任务运行
-    ├── verify_task.sh          # 提取/执行任务验收命令
-    └── summarize_progress.sh   # 进度统计（支持 --report 生成报告）
-tests/                          # Shell 黑盒测试 + Python 单元测试
-```
-
-## 测试
+运行完整测试套件：
 
 ```bash
-bash tests/run_all_tests.sh
+python3 -m pytest tests/ -v
 ```
 
-也可以只运行 Python 单元测试：
+测试覆盖：
+
+- 适配器路由和回退机制
+- 任务生命周期管理
+- 配置加载和环境变量
+- 错误处理和日志记录
+- 进程状态检测
+- 历史记录和统计
+
+## 🔧 配置选项
+
+### 基础配置 (`.dual-ai-collab/config.json`)
+
+```json
+{
+  "default_backend": "adapter",
+  "default_sandbox": "workspace-write",
+  "log_level": "INFO",
+  "enable_error_details": true
+}
+```
+
+### 模型路由配置 (`.dual-ai-collab/model-routing.json`)
+
+```json
+{
+  "model_routing": {
+    "quick": {"adapter": "deepseek-cli", "reason": "..."},
+    "normal": {"adapter": "claude-cli", "reason": "..."},
+    "heavy": {"adapter": "codex", "reason": "..."}
+  },
+  "fallback_chain": {
+    "deepseek-cli": ["claude-cli", "codex"],
+    "claude-cli": ["codex"],
+    "codex": []
+  },
+  "adapter_commands": {
+    "deepseek-cli": ["/path/to/your-codex-compatible-wrapper"],
+    "claude-cli": ["claude"],
+    "codex": ["codex", "exec", "-"]
+  }
+}
+```
+
+### 环境变量
 
 ```bash
-python tests/run_python_tests.py
+# 适配器配置
+# 路由在 .dual-ai-collab/model-routing.json 中配置
+
+# 默认设置
+export DUAL_AI_DEFAULT_BACKEND=adapter
+export DUAL_AI_DEFAULT_SANDBOX=workspace-write
+
+# 日志级别
+export DUAL_AI_LOG_LEVEL=DEBUG
 ```
 
-> 当前完整回归仍包含 shell 黑盒测试，因此 Windows 上更适合先运行 `python tests/run_python_tests.py`，或做 Python smoke test，例如 `python skill/scripts/cli.py init`、`python skill/scripts/cli.py summary`。如果需要完整 shell 回归，建议在 Git Bash、WSL 或 CI 的 Linux runner 中执行。
+## 📈 性能特性
 
-当前仓库测试主要覆盖以下核心行为：
+- **缓存机制**：进程状态检测缓存（0.5秒 TTL）
+- **两阶段检测**：轻量级 `os.kill` + 按需 `ps` 检查
+- **僵尸进程处理**：自动检测和清理僵尸进程
+- **资源感知**：根据系统资源动态调整任务选择
+- **结构化日志**：高效的 JSON 日志格式
 
-- 任务领取和依赖调度
-- 状态流转和并发更新安全
-- checkpoint 写入、恢复和损坏检测
-- 卡死检测与任务级阈值
-- 进度统计（含 FAILED 状态和报告生成）
-- 验收命令提取与执行
-- 执行器 status/stop/start
-- 真实脚本黑盒验证
-- 安装器、任务存储、运行状态和 CLI 的 Python 单元测试
+## 🛠️ 故障排查
 
-## 依赖
+### 适配器不可用
 
-- 必需：Claude Code
-- 自动开发增强：Codex CLI（`npm install -g @openai/codex-cli`）
-  - 安装后可使用后台异步执行、并行 worker、run record 管理
-  - 未安装时仍可使用 `Claude-only` 模式完成访谈、规划、实现和验证，但执行会改为同步、不可并行
-- 可选 adapter：Claude CLI（`claude`）
-  - 当 `DUAL_AI_ADAPTER=claude-cli` 且使用 `--backend adapter` 时启用
-  - 适合保留现有后台 worker / stall 检测 / run record 流程，但不依赖 `codex`
-- 可选自定义 adapter：
-  - 设置 `DUAL_AI_ADAPTER=custom-json`
-  - 设置 `DUAL_AI_CUSTOM_CMD_JSON` 为 JSON argv 数组
-  - 若数组中包含 `{prompt}`，启动时会直接替换；否则 prompt 会通过 stdin 传入
-- 前端增强：`ui-ux-pro-max` skill（前端任务推荐作为默认前置能力）
-- 审计/调试增强：`superpowers@claude-plugins-official`（推荐用于 spec review、code quality review、systematic debugging）
+```bash
+# 检查命令是否可用
+which deepseek-cli claude codex
 
-## 许可证
+# 查看回退日志
+grep "adapter_fallback" .dual-ai-collab/logs/task-*.log
+```
 
-MIT
+### 任务卡住
+
+```bash
+# 检查状态
+python3 skill/scripts/cli.py run status TASK_NUM
+
+# 查看日志
+tail -f .dual-ai-collab/logs/task-TASK_NUM.log
+
+# 强制停止
+python3 skill/scripts/cli.py run stop TASK_NUM
+```
+
+更多问题排查请参见 [TUTORIAL.md](./TUTORIAL.md#故障排查)。
+
+## 📝 改进历史
+
+详见 [IMPROVEMENTS.md](./IMPROVEMENTS.md)，包括：
+
+- 僵尸进程检测修复
+- 性能优化（缓存和两阶段检测）
+- 结构化日志系统
+- 多模型适配器路由
+- 智能任务调度
+- 任务分析可视化
+
+## 🤝 贡献
+
+欢迎提交 Issue 和 Pull Request！
+
+## 📄 许可证
+
+MIT License
+
+## 🔗 相关链接
+
+- [完整使用教程](./TUTORIAL.md)
+- [改进历史](./IMPROVEMENTS.md)
+- [任务板规范](./skill/references/task-board.md)
+
+## 当前实现边界
+
+- direct 和 adapter worker 会记录开始与结束历史，状态包括 `running`、`success`、`failed` 和 `stopped`。历史文件原子写入，每次执行使用独立编号。
+- 历史中的 `success` 表示执行进程正常退出，不等同于验收通过，也不会自动将任务板标记为 `DONE`。应先运行 `verify run`，通过后再执行 `update TASK_NUM DONE`。
+- 历史记录从 worker 启动时开始；强制杀死进程（如 SIGKILL）或主机断电后的历史状态恢复尚未实现。
+- `templates create` 默认输出 JSON；加 `--add` 会校验并写入任务板。`select --smart` 与 `schedule` 共用依赖筛选和资源排序，默认 `select` 保留优先级排序。
+- adapter 支持 Codex 协议和 Claude 原生协议；DeepSeek 等第三方 CLI 需显式配置兼容包装器。plugin 后端暂未实现。
+
+## 新增命令与适配协议
+
+```bash
+# 只检查配置与可执行文件，不发起模型请求或检查登录
+python3 skill/scripts/cli.py check-adapters
+
+# 创建并入库；依赖必须存在，编号不能重复（001 与 1 视为同一编号）
+python3 skill/scripts/cli.py templates create docs 002 --var topic=登录 --depends-on 001 --add
+
+# 选择满足依赖与资源条件的任务；需要 analytics 可选依赖
+python3 skill/scripts/cli.py select --smart
+python3 skill/scripts/cli.py select --smart --parallel
+```
+
+任务统一使用 `id`，依赖写为 `"#001, #002"` 或 `"无"`；读取时兼容旧的 `task_num` 与列表依赖。
+`--add` 使用与状态更新相同的文件锁，拒绝重复编号、自身依赖、不存在的依赖与循环依赖，并同步 Markdown。
+模板中的验收条目是建议，仍需补充项目实际的可执行验收命令。
+
+Claude 原生配置示例：
+
+```json
+{
+  "model_routing": {"normal": {"adapter": "claude-cli"}},
+  "adapter_commands": {"claude-cli": ["claude"]},
+  "adapter_protocols": {"claude-cli": "claude"},
+  "fallback_chain": {"claude-cli": []}
+}
+```
+
+```bash
+python3 skill/scripts/cli.py run start 001 "实现任务" --backend adapter --sandbox provider-default
+```
+
+`provider-default` 使用 Claude 的 `default` 权限模式，不等同于 Codex 的操作系统沙箱，也不会自动绕过权限提示。
+Claude 调用使用 `--print`、`--output-format json`、`--json-schema`，并转换返回的 `structured_output`；错误、权限拒绝或无效输出会记为失败。
+接口依据 [Claude 官方 CLI 文档](https://code.claude.com/docs/en/cli-reference) 和 [结构化输出文档](https://code.claude.com/docs/en/headless)。
+
+需要 `workspace-write` / `read-only` 等 Codex 沙箱时，回退会跳过 Claude 原生协议；
+使用 `provider-default` 时则跳过 Codex 协议。候选耗尽直接报错，不启动已知不可用的 worker。
+`adapter_paths` 会同时作用于检测和实际启动。自定义包装器可显式设置 `adapter_protocols` 为 `codex`。
+示例里的 `/path/to/your-codex-compatible-wrapper` 需要替换；未提供包装器时请移除该命令项，不假设存在统一的 DeepSeek CLI。
+
+`check-adapters` 仅确认可执行文件存在；此次原生协议集成使用模拟 CLI 验证，真实账号与模型调用尚未验证。

@@ -20,6 +20,8 @@ FIELD_LABELS = {
     "dependencies": "依赖任务",
     "execution_level": "执行级别",
     "stall_threshold_minutes": "卡死阈值",
+    "adapter": "适配器",
+    "model": "模型",
 }
 LABEL_TO_KEY = {value: key for key, value in FIELD_LABELS.items()}
 DEFAULT_TASKS_JSON = "planning/tasks.json"
@@ -94,13 +96,13 @@ def _default_document(paths: TaskPaths) -> dict:
 
 def _normalize_task(task: dict) -> dict:
     result = deepcopy(task)
-    result["id"] = str(result.get("id", "")).strip()
+    result["id"] = str(result.get("id", result.get("task_num", ""))).strip()
     result["title"] = str(result.get("title", "")).strip()
     result["priority"] = str(result.get("priority", "P9") or "P9").strip()
     result["status"] = str(result.get("status", "")).strip()
     result["status_explicit"] = bool(result.get("status_explicit", bool(result["status"])))
     result["assigned_to"] = str(result.get("assigned_to", "")).strip()
-    result["dependencies"] = str(result.get("dependencies", "无") or "无").strip()
+    result["dependencies"] = format_dependencies(result.get("dependencies", "无"))
     result["execution_level"] = str(result.get("execution_level", "") or "").strip()
     stall_value = str(result.get("stall_threshold_minutes", "") or "").strip()
     result["stall_threshold_minutes"] = _normalize_stall_value(stall_value) if stall_value else ""
@@ -322,22 +324,41 @@ def require_explicit_status(task: dict, task_file: str) -> None:
     raise CliError(f"任务 #{task['id']} 缺少 `**状态**` 字段，无法继续处理: {task_file}")
 
 
-def has_dependencies(deps: str) -> bool:
-    return bool(deps) and deps not in ("无", "-", "")
+def dependency_ids(deps) -> list[str]:
+    """Read canonical dependency text or legacy lists; reject ambiguous input."""
+    if isinstance(deps, list):
+        return list(dict.fromkeys(dep for item in deps for dep in dependency_ids(item)))
+    text = str(deps or "").strip()
+    if text in ("", "无", "-"):
+        return []
+    parts = re.split(r"[,，、\s]+", text)
+    if any(not re.fullmatch(r"#?[0-9]+", part) for part in parts):
+        raise CliError(f"无效的依赖任务: {text}，请使用 #001, #002")
+    return list(dict.fromkeys(part.lstrip("#") for part in parts))
+
+
+def format_dependencies(deps) -> str:
+    return ", ".join(f"#{dep}" for dep in dependency_ids(deps)) or "无"
+
+
+def has_dependencies(deps) -> bool:
+    return bool(dependency_ids(deps))
 
 
 def dependency_satisfied(tasks: list[dict], dep_num: str) -> bool:
-    target = _normalize_task_num(dep_num)
-    for task in tasks:
-        if _normalize_task_num(task.get("id", "")) == target:
-            return task.get("status") in ("DONE", "VERIFIED")
-    return False
+    task = find_task({"tasks": tasks}, dep_num)
+    return bool(task and task.get("status") in ("DONE", "VERIFIED"))
 
 
-def all_dependencies_satisfied(tasks: list[dict], deps: str) -> bool:
-    if not has_dependencies(deps):
-        return True
-    return all(dependency_satisfied(tasks, match.group(1)) for match in re.finditer(r"#(\d+)", deps))
+def all_dependencies_satisfied(tasks: list[dict], deps) -> bool:
+    return all(dependency_satisfied(tasks, dep) for dep in dependency_ids(deps))
+
+
+def executable_tasks(document: dict) -> list[dict]:
+    for task in document.get("tasks", []):
+        require_explicit_status(task, document.get("json_path", DEFAULT_TASKS_JSON))
+    return [task for task in open_tasks_sorted(document)
+            if all_dependencies_satisfied(document["tasks"], task.get("dependencies"))]
 
 
 def resolve_stall_minutes(task: dict | None) -> int:
