@@ -14,14 +14,18 @@ from pathlib import Path
 
 
 FIELD_LABELS = {
+    "id": "任务编号",
+    "title": "标题",
     "priority": "优先级",
     "status": "状态",
     "assigned_to": "分配给",
     "dependencies": "依赖任务",
+    "estimated_time": "预计时间",
     "execution_level": "执行级别",
     "stall_threshold_minutes": "卡死阈值",
     "adapter": "适配器",
     "model": "模型",
+    "description": "描述",
 }
 LABEL_TO_KEY = {value: key for key, value in FIELD_LABELS.items()}
 DEFAULT_TASKS_JSON = "planning/tasks.json"
