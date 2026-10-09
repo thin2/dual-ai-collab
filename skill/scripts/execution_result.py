@@ -1,4 +1,6 @@
 """Shared result contract for execution backends; acceptance remains separate."""
+from __future__ import annotations
+
 from tasks_store import CliError
 
 RESULT_SCHEMA = {

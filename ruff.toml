@@ -1,0 +1,23 @@
+# Ruff configuration for dual-ai-collab
+
+target-version = "py39"
+
+[lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+]
+
+ignore = [
+    "E501",   # line too long - let formatter handle it
+    "B008",   # function call in default argument
+    "SIM108", # use ternary instead of if-else - sometimes clearer as is
+]
+
+[lint.per-file-ignores]
+"tests/*.py" = ["B011"]  # assert False in tests is fine
