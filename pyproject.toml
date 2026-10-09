@@ -7,7 +7,7 @@ name = "dual-ai-collab"
 version = "0.1.0"
 description = "Task execution and verification tools for AI collaboration"
 requires-python = ">=3.9"
-dependencies = []
+dependencies = ["Flask>=2.3,<4", "packaging>=23"]
 
 [project.optional-dependencies]
 analytics = ["psutil>=5.9"]

@@ -81,7 +81,7 @@ def test_execute_verify_repair_resumes_same_thread(project):
     assert read_tasks_document()['tasks'][0]['status'] == 'OPEN'
     result = cli(project, 'complete', '001')
     assert result.returncode == 0, result.stderr
-    assert read_tasks_document()['tasks'][0]['status'] == 'DONE'
+    assert read_tasks_document()['tasks'][0]['status'] == 'AWAITING_REVIEW'
     report = json.loads(Path(json.loads(result.stdout)['report_file']).read_text())
     assert report['passed'] and report['thread_id'] == first['thread_id']
     assert Path(first['run_dir'], 'state.json').exists()
@@ -108,11 +108,15 @@ def test_steer_interrupt_and_duplicate_start(project):
 
 
 @pytest.mark.skipif(os.name == 'nt', reason='executable Python fixture')
-@pytest.mark.parametrize('prompt,expected', [('DISCONNECT', 'failed'), ('APPROVAL', 'blocked'), ('WAIT', 'failed')])
+@pytest.mark.parametrize('prompt,expected', [('DISCONNECT', 'failed'), ('APPROVAL', 'blocked'), ('WAIT', 'blocked')])
 def test_failure_modes_do_not_report_success(project, prompt, expected):
     assert cli(project, 'start', '001', prompt, '--backend', 'app-server', '--timeout', '0.5').returncode == 0
     record = wait()
     assert record['status'] == expected, record
+    if prompt == 'WAIT':
+        assert record['blocked_category'] == 'timeout'
+        history = json.loads(Path('.dual-ai-collab/history', record['history_id'] + '.json').read_text())
+        assert history['blocked_category'] == 'timeout' and history['blocked_reason']
     assert cli(project, 'complete', '001').returncode == 1
 
 
@@ -158,8 +162,30 @@ def test_isolated_worktree_and_root_owned_records(project, tmp_path):
     assert record['isolated'] and record['workdir'] != str(repo)
     assert not (repo / 'artifact.txt').exists()
     assert cli(project, 'complete', '001').returncode == 0
-    assert read_tasks_document()['tasks'][0]['status'] == 'DONE'
+    assert read_tasks_document()['tasks'][0]['status'] == 'AWAITING_REVIEW'
     assert not (Path(record['workdir']) / '.dual-ai-collab/runs').exists()
+    from task_board import review_task, integrate_task
+    from tasks_store import executable_tasks
+    from types import SimpleNamespace
+    doc = read_tasks_document()
+    doc['tasks'].append(dict(id='002', title='dependent', status='OPEN', dependencies='#001'))
+    write_tasks_document(doc)
+    assert executable_tasks(read_tasks_document()) == []
+    options = SimpleNamespace(task_num='001', task_file='planning/tasks.json',
+                              decision='approved', note='Reviewed isolated implementation',
+                              target=str(repo), commit='HEAD')
+    review_task(options)
+    assert executable_tasks(read_tasks_document()) == []
+    # Simulate a reviewer integrating only the task artifact (not worker runtime files).
+    (repo / 'artifact.txt').write_text(Path(record['workdir'], 'artifact.txt').read_text())
+    git('add', 'artifact.txt')
+    git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'integrate feature')
+    integrate_task(options)
+    assert [task['id'] for task in executable_tasks(read_tasks_document())] == ['002']
+    assert cli(project, 'continue', '001', '修复').returncode == 0
+    wait()
+    assert executable_tasks(read_tasks_document()) == []
+
 
 
 def test_worktree_refuses_dirty_source(project):
@@ -241,3 +267,24 @@ def test_continue_reconciles_abandoned_history_without_status_query(project):
     assert json.loads(Path(previous['run_dir'], 'state.json').read_text())['status'] == 'interrupted'
     old_history = json.loads((project / '.dual-ai-collab/history' / (history_id + '.json')).read_text())
     assert old_history['status'] == 'failed'
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='executable Python fixture')
+def test_context_is_refreshed_per_turn(project):
+    board()
+    result = cli(project, 'start', '001', '修复', '--backend', 'app-server',
+                 '--context-task-file', 'planning/tasks.json')
+    assert result.returncode == 0, result.stderr
+    first = wait()
+    first_context = Path(first['context_file']).read_text()
+    doc = read_tasks_document()
+    doc['tasks'][0]['sections'].append({'heading': '决策', 'body': 'Keep public API stable'})
+    write_tasks_document(doc)
+    result = cli(project, 'continue', '001', '继续修复')
+    assert result.returncode == 0, result.stderr
+    second = wait()
+    assert first['thread_id'] == second['thread_id']
+    assert second['run_id'] != first['run_id']
+    assert 'Keep public API stable' in Path(second['context_file']).read_text()
+    assert Path(first['context_file']).read_text() == first_context
+    assert 'Keep public API stable' in Path(second['prompt_file']).read_text()

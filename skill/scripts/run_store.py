@@ -33,8 +33,8 @@ def exit_file_path(task_num: str) -> Path:
     return _logs_dir() / f"task-{task_num}.exit"
 
 
-def read_run_record(task_num: str) -> dict:
-    path = run_record_path(task_num)
+def read_run_record(task_num: str, *, project_root=None) -> dict:
+    path = (Path(project_root) / ".dual-ai-collab/runs" / f"task-{task_num}.json") if project_root is not None else run_record_path(task_num)
     if not path.exists():
         return {}
     try:

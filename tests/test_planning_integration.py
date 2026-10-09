@@ -42,7 +42,7 @@ def test_template_add_round_trip_and_reject_duplicates(tmp_path, monkeypatch):
     assert before != Path('planning/tasks.json').read_bytes()
     assert cli(tmp_path, 'select', '--parallel').stdout.count('|') == 2
     assert cli(tmp_path, 'update', '001', 'DONE').returncode == 0
-    assert cli(tmp_path, 'select', '--parallel').stdout.startswith('3|002|')
+    assert 'NO_PARALLEL_TASKS' in cli(tmp_path, 'select', '--parallel').stdout
     assert 't001 --> t002' in cli(tmp_path, 'visualize').stdout
     assert '001 → 002' in cli(tmp_path, 'analyze').stdout
 
@@ -70,7 +70,7 @@ def test_smart_select_schedule_share_eligible_tasks(tmp_path, monkeypatch, capsy
     monkeypatch.setattr(task_scheduler, 'get_system_resources', lambda: RESOURCES)
     doc = read_tasks_document()
     ranking = task_scheduler.rank_available_tasks(doc['tasks'], doc)
-    assert {t['id'] for t in ranking} == {'002', '004'}
+    assert {t['id'] for t in ranking} == {'004'}
     task_manager.cmd_select(False, 'planning/tasks.json', smart=True)
     assert f"|{ranking[0]['id']}|" in capsys.readouterr().out
     report = task_scheduler.generate_schedule_report()
@@ -107,7 +107,7 @@ def test_legacy_template_schema_is_readable(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     write_tasks_document({'tasks': [{'task_num': '001', 'status': 'DONE', 'dependencies': []},
                                   {'task_num': '002', 'status': 'OPEN', 'dependencies': ['001']}]})
-    assert [t['id'] for t in executable_tasks(read_tasks_document())] == ['002']
+    assert executable_tasks(read_tasks_document()) == []
 
 
 def test_template_add_rejects_cycle_without_changing_board(tmp_path, monkeypatch):

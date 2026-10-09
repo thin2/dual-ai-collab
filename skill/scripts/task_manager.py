@@ -150,6 +150,8 @@ def cmd_update(task_num: str, new_status: str, task_file: str) -> int:
             print(f"SKIP: 任务 #{task_num} 已经是 {new_status}")
             return 0
 
+        target.pop("review", None)
+        target.pop("integration", None)
         target["status"] = new_status
         target["status_explicit"] = True
         if "status" not in target.get("field_order", []):
@@ -259,23 +261,30 @@ def cmd_summary(task_file: str, report: bool = False) -> int:
     document = read_tasks_document(task_file)
     valid_tasks = report_missing_status(document["tasks"])
 
-    counts = {"OPEN": 0, "IN_PROGRESS": 0, "DONE": 0, "VERIFIED": 0, "REJECTED": 0, "FAILED": 0}
+    counts = {"AWAITING_REVIEW": 0, "AWAITING_INTEGRATION": 0, "OPEN": 0, "IN_PROGRESS": 0, "DONE": 0, "VERIFIED": 0, "REJECTED": 0, "FAILED": 0}
     for task in valid_tasks:
         status = task.get("status")
         if status in counts:
             counts[status] += 1
 
     total = len(valid_tasks)
-    completed = counts["DONE"] + counts["VERIFIED"]
+    from task_board import integration_valid, receipt_valid
+    completed = sum(integration_valid(task) for task in valid_tasks)
     completion_rate = (completed / total * 100) if total else 0
-    audited = counts["VERIFIED"] + counts["REJECTED"]
-    audit_rate = (counts["VERIFIED"] / audited * 100) if audited else 0
+    approved = sum(task.get('review', {}).get('decision') == 'approved'
+                   and receipt_valid(task, task['review']) for task in valid_tasks)
+    # Keep historical audit counts visible while counting new review receipts.
+    audited = approved + counts["VERIFIED"] + counts["REJECTED"]
+    audit_rate = ((approved + counts["VERIFIED"]) / audited * 100) if audited else 0
 
     lines = [
         f"总任务: {total}",
         f"OPEN: {counts['OPEN']}",
         f"IN_PROGRESS: {counts['IN_PROGRESS']}",
         f"DONE: {counts['DONE']}",
+        f"AWAITING_REVIEW: {counts['AWAITING_REVIEW']}",
+        f"AWAITING_INTEGRATION: {counts['AWAITING_INTEGRATION']}",
+        f"INTEGRATED: {completed}",
         f"VERIFIED: {counts['VERIFIED']}",
         f"REJECTED: {counts['REJECTED']}",
         f"FAILED: {counts['FAILED']}",

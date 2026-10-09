@@ -36,9 +36,9 @@ teardown_test_env
 
 setup_test_env
 create_test_taskboard
-it "完成率应为 40.0%（2/5 已完成+已验收）"
+it "无集成证据的旧任务完成率应为 0.0%"
 stats=$(summary_output "$TASK_BOARD")
-assert_equals "40.0%" "$(value_of "$stats" "完成率")"
+assert_equals "0.0%" "$(value_of "$stats" "完成率")"
 teardown_test_env
 
 setup_test_env
@@ -66,9 +66,9 @@ cat > "$TASK_BOARD" <<'EOF'
 
 ---
 EOF
-it "全部验收时完成率应为 100.0%"
+it "只有旧验收状态时完成率应为 0.0%"
 stats=$(summary_output "$TASK_BOARD")
-assert_equals "100.0%" "$(value_of "$stats" "完成率")"
+assert_equals "0.0%" "$(value_of "$stats" "完成率")"
 
 it "全部验收时审计通过率应为 100.0%"
 stats=$(summary_output "$TASK_BOARD")

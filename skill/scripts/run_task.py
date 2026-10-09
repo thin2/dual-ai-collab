@@ -682,8 +682,11 @@ def cmd_start(
     sandbox: str | None = None,
     structured: bool = True,
     isolate: bool = False,
+    context_task_file: str | None = None,
     timeout: float | None = None,
 ) -> int:
+    from run_support import preflight
+    preflight(task_num, workdir, context_task_file or "planning/codex-tasks.md")
     config = load_config()
     if backend is None:
         backend = config.get("default_backend", "direct")
@@ -694,9 +697,9 @@ def cmd_start(
     options["structured"] = structured
     options["sandbox"] = sandbox or config.get("default_sandbox", "workspace-write")
     task_num = session_backend.task_id(task_num)
-    if backend != "app-server" and (isolate or timeout is not None):
-        raise CliError("--isolate / --timeout 目前仅用于 app-server 后端")
-    options.update(isolate=isolate, timeout=timeout)
+    if backend != "app-server" and (isolate or timeout is not None or context_task_file):
+        raise CliError("--isolate / --timeout / --context-task-file 目前仅用于 app-server 后端")
+    options.update(isolate=isolate, timeout=timeout, context_task_file=context_task_file)
     if backend == "app-server":
         record = get_backend(backend).call("start", task_num, prompt, workdir, options)
     else:
@@ -748,6 +751,7 @@ def _add_start_arguments(p_start) -> None:
     p_start.add_argument("--model", default=None, help="覆盖任务板 **模型**")
     p_start.add_argument("--effort", default=None, choices=EFFORTS, help="覆盖任务板 **推理强度** / 执行级别推导值")
     p_start.add_argument("--sandbox", default=None, choices=SANDBOXES, help="沙箱模式（默认从配置读取）")
+    p_start.add_argument("--context-task-file", help="app-server: 每轮自动刷新此任务板的上下文快照")
     p_start.add_argument("--isolate", action="store_true", help="app-server: 从干净的 Git HEAD 创建独立 worktree")
     p_start.add_argument("--timeout", type=float, help="app-server: 单轮执行超时秒数")
     p_start.add_argument("--no-structured", action="store_true", help="不使用 --output-schema 结构化结果")
@@ -807,6 +811,16 @@ def register_subparsers(subparsers, *, nested: bool = False):
 
 
 def register_session_commands(subparsers):
+    parser = subparsers.add_parser("verify-manual", help="逐项确认并记录手动验收，不改变执行结果")
+    parser.add_argument("task_num")
+    parser.add_argument("--task-file", default="planning/codex-tasks.md")
+    parser.add_argument("--note")
+    parser.add_argument("--confirm", type=int, action="append", help="确认已实际通过的标准编号，可重复")
+    parser.add_argument("--list", action="store_true", help="只列出验收标准编号")
+    parser = subparsers.add_parser("watch", help="持续显示纯文本状态，终态自动退出")
+    parser.add_argument("task_num")
+    parser.add_argument("--interval", type=float, default=5)
+
     caps = subparsers.add_parser("capabilities", help="查看执行后端能力")
     caps.add_argument("--backend", choices=BACKENDS)
     for name in ("continue", "steer"):
@@ -818,7 +832,7 @@ def register_session_commands(subparsers):
     parser.add_argument("task_num")
     parser.add_argument("--after", type=int, default=0)
     parser.add_argument("--limit", type=int, default=100)
-    parser = subparsers.add_parser("complete", help="在执行工作目录验收，通过后标记 DONE")
+    parser = subparsers.add_parser("complete", help="在执行工作目录验收，通过后进入 AWAITING_REVIEW")
     parser.add_argument("task_num")
     parser.add_argument("--task-file", default="planning/codex-tasks.md")
     parser.add_argument("--repair", action="store_true", help="验收失败后恢复原会话修复一次，不自动循环")
@@ -826,6 +840,12 @@ def register_session_commands(subparsers):
 
 def dispatch(args) -> int:
     operation = getattr(args, "run_command", None) or getattr(args, "command", None)
+    if operation == "verify-manual":
+        from run_support import verify_manual
+        return verify_manual(args)
+    if operation == "watch":
+        from run_support import watch
+        return watch(args.task_num, args.interval)
     if operation == "capabilities":
         names = [args.backend] if args.backend else BACKENDS
         print(json.dumps({name: get_backend(name).capabilities() for name in names}, ensure_ascii=False, indent=2))
@@ -890,7 +910,7 @@ def dispatch(args) -> int:
             effort=args.effort,
             sandbox=args.sandbox,
             structured=not args.no_structured,
-            isolate=args.isolate, timeout=args.timeout,
+            isolate=args.isolate, timeout=args.timeout, context_task_file=args.context_task_file,
         )
     if getattr(args, "run_command", None) == "status" or getattr(args, "command", None) == "status":
         return cmd_status(args.task_num)

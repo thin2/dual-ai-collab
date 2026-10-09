@@ -42,7 +42,7 @@ python -c "from shutil import which; print('CODEX_OK' if which('codex') else 'CO
 1. 先判断复杂度，再决定流程重量；简单需求走轻流程，复杂需求走重流程。
 2. 先规划，后开发；规划先审计，再让用户确认。
 3. 任务真相源是 `planning/tasks.json`；`planning/codex-tasks.md` 是渲染视图。
-4. 验收命令必须执行，通过后才可标记 `DONE`（仅完整协作模式）。
+4. 验收、审查和目标仓库集成确认全部完成后才可标记 `DONE`（仅完整协作模式）。
 5. 访谈、审计都按复杂度分级。
 6. 用户可读反馈由 Claude 负责翻译，脚本输出保持程序化。
 7. 流程依赖 grill-me 和 ui-ux-pro-max 都是**可选的**。无这些 skill 时，Claude 用手工方式替代（见各步说明）。
@@ -138,7 +138,8 @@ python "<skill-dir>/scripts/cli.py" checkpoint-write user_approved spec_file=[�
 适用：`codex` 可用，且任务适合后台执行。
 
 ```bash
-python "<skill-dir>/scripts/cli.py" run start XXX "任务提示词"
+python "<skill-dir>/scripts/cli.py" run capabilities --backend app-server
+python "<skill-dir>/scripts/cli.py" run start XXX "任务提示词" --backend app-server --context-task-file planning/tasks.json
 python "<skill-dir>/scripts/cli.py" run status XXX
 python "<skill-dir>/scripts/cli.py" run stop XXX
 ```
@@ -147,9 +148,7 @@ python "<skill-dir>/scripts/cli.py" run stop XXX
 
 适用：希望保留后台 worker / run record / 卡死检测，但不直接依赖 `codex`。
 
-默认内置：
-- `claude-cli`：设置 `DUAL_AI_ADAPTER=claude-cli`
-- `custom-json`：设置 `DUAL_AI_ADAPTER=custom-json` 和 `DUAL_AI_CUSTOM_CMD_JSON`
+通过 `.dual-ai-collab/model-routing.json` 配置适配器、协议与回退链；先用 `check-adapters` 检查命令。原生 Claude CLI 需要显式传入 `--sandbox provider-default`。主模型是 Claude 时，可以直接使用上面的 app-server 命令调度 Codex，不必再启动另一个 Claude。
 
 ```bash
 python "<skill-dir>/scripts/cli.py" run start XXX "任务提示词" --backend adapter
@@ -173,16 +172,27 @@ python "<skill-dir>/scripts/cli.py" run start XXX "任务提示词" --backend ad
 4. 按当前模式实现
 5. **可选 Midpoint Check**：任务中期检查（高风险任务推荐）
 6. 运行验收命令
-7. 通过后更新 `DONE`
-8. 写 checkpoint
+7. 验收通过进入 `AWAITING_REVIEW`；审查通过后进入 `AWAITING_INTEGRATION`
+8. 将代码集成到目标仓库并提交，运行 `board integrate` 重新验收并确认交付
+9. 写 checkpoint；完成数以面板的 confirmed 集成为准
 
 ```bash
 python "<skill-dir>/scripts/cli.py" update XXX IN_PROGRESS
 # 执行前先做 kickoff check（见下方）
-python "<skill-dir>/scripts/cli.py" verify run XXX
-python "<skill-dir>/scripts/cli.py" update XXX DONE
+python "<skill-dir>/scripts/cli.py" run complete XXX
+python "<skill-dir>/scripts/cli.py" board show
+# 主模型读取记录中的 workdir，在那里审查 diff 和验收报告。
+python "<skill-dir>/scripts/cli.py" board review XXX --decision approved --note "具体审查结论"
+# 完成实际集成和提交后，确认该提交包含本任务改动：
+python "<skill-dir>/scripts/cli.py" board integrate XXX --target /path/to/source --commit COMMIT_SHA --note "集成改动说明"
 python "<skill-dir>/scripts/cli.py" checkpoint-write developing current_task=XXX completed_tasks=N
 ```
+
+CLI / Adapter 后端或 Claude 同步实现时，执行 `verify run XXX`，通过后 `update XXX AWAITING_REVIEW`，再走同样的审查和集成确认。没有 Git 提交的任务可以保留待集成状态；当前自动解锁硬依赖需要 Git 集成证据。
+
+上下文由任务定义、项目头部中的规范引用、约束/决策章节、验收命令和依赖集成状态组成。`board context XXX --output /tmp/task-XXX.md` 可导出给任意主模型；app-server 的 `--context-task-file` 会在 start、continue 和 repair 每轮重新生成快照并保存在 run 目录，原会话保留 thread_id。不会自动载入全部历史日志或引用文件内容；主模型应维护任务章节中的决策，并按需读取规范文件。
+
+旧 DONE / VERIFIED 不自动解锁依赖。需要重新审查并运行 `board integrate`。不要用 `update DONE` 绕过交付流程。
 
 ### 5.1 Kickoff Check（任务启动检查）
 

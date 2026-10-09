@@ -28,17 +28,43 @@ python3 skill/scripts/cli.py run complete 001 --repair
 `--isolate` 需要干净的 Git 工作区。真实 Codex 0.160.1 已跑通执行、失败验收、原线程修复、再次验收；
 完整命令、权限与恢复边界见 [会话后端说明](./docs/session-backend.md)。
 
+## 任务面板
+
+`python3 skill/scripts/cli.py board show` 分别显示执行、验收、审查和集成状态，并给出下一步操作。
+验收通过进入待审查；确认目标仓库集成后才解锁依赖。旧 DONE / VERIFIED 不自动算作已交付。
+使用 `board context 001` 导出上下文，或在 app-server 启动时加 `--context-task-file planning/tasks.json`，每轮自动刷新快照。
+详见 [任务面板与交付流程](./docs/task-board.md)。
+
 ## 🚀 快速开始
 
 ### 安装
 
 ```bash
 # Python 3.9+，在仓库根目录执行
-python3 -m pip install -e '.[analytics,test]'
+python3 -m pip install --user Flask  # Web UI 依赖
 ```
 
 基础任务管理、执行、验收和历史查询仅使用 Python 标准库，可直接运行脚本。
-`analytics` 提供调度分析所需的 `psutil`，`test` 提供 pytest；缺少分析依赖不会影响基础命令。
+可选依赖：`psutil`（调度分析）、`pytest`（测试）。
+
+### Web 管理界面
+
+```bash
+# 启动 Web 服务（推荐使用 5001 端口，避免 macOS AirPlay 占用 5000）
+python3 web_server.py 5001
+
+# 浏览器访问
+open http://localhost:5001
+```
+
+**Web UI 功能**：
+- 📊 实时任务面板：总任务数、进行中、待审查、已完成统计
+- 🔍 任务列表：查看所有任务，按状态筛选
+- 📝 任务详情：完整信息展示，状态更新
+- 🔄 自动刷新：每 5 秒自动更新任务状态
+- 📈 执行历史：查看任务执行记录
+
+详细使用说明见：[Web UI 文档](docs/web-ui.md)
 
 ### 初始化项目
 
@@ -369,7 +395,7 @@ MIT License
 ## 当前实现边界
 
 - direct 和 adapter worker 会记录开始与结束历史，状态包括 `running`、`success`、`failed` 和 `stopped`。历史文件原子写入，每次执行使用独立编号。
-- 历史中的 `success` 表示执行进程正常退出，不等同于验收通过，也不会自动将任务板标记为 `DONE`。应先运行 `verify run`，通过后再执行 `update TASK_NUM DONE`。
+- 历史中的 `success` 表示执行进程正常退出，不等同于验收通过，也不会自动将任务板标记为 `DONE`。app-server 应运行 `run complete`，其他模式先运行 `verify run` 并进入待审查；之后通过 `board review` 和 `board integrate` 确认交付。
 - 历史记录从 worker 启动时开始；强制杀死进程（如 SIGKILL）或主机断电后的历史状态恢复尚未实现。
 - `templates create` 默认输出 JSON；加 `--add` 会校验并写入任务板。`select --smart` 与 `schedule` 共用依赖筛选和资源排序，默认 `select` 保留优先级排序。
 - adapter 支持 Codex 协议和 Claude 原生协议；DeepSeek 等第三方 CLI 需显式配置兼容包装器。plugin 后端暂未实现。

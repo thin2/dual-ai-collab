@@ -69,6 +69,7 @@ def record_task_end(
     status: str,
     exit_code: int | None = None,
     error_message: str | None = None,
+    *, blocked_reason: str | None = None, blocked_category: str | None = None,
 ) -> None:
     """记录任务结束。"""
     history_file = HISTORY_DIR / f"{execution_id}.json"
@@ -87,6 +88,8 @@ def record_task_end(
     data["status"] = status
     data["exit_code"] = exit_code
     data["error_message"] = error_message
+    data["blocked_reason"] = blocked_reason
+    data["blocked_category"] = blocked_category
 
     atomic_write(history_file, json.dumps(data, ensure_ascii=False, indent=2) + "\n")
 
@@ -113,7 +116,11 @@ def get_task_statistics(task_num: str) -> dict[str, Any]:
     completed = [h for h in history if h["status"] in ("success", "failed")]
     durations = [h["duration_seconds"] for h in completed if h["duration_seconds"]]
 
+    from collections import Counter
+    blocked = [h for h in history if h['status'] == 'blocked']
     return {
+        "blocked": len(blocked),
+        "blocked_categories": dict(Counter(h.get('blocked_category') or 'unknown' for h in blocked)),
         "executions": len(history),
         "successes": len([h for h in history if h["status"] == "success"]),
         "failures": len([h for h in history if h["status"] == "failed"]),
@@ -163,6 +170,10 @@ def generate_report() -> str:
         lines.append(f"## 任务 #{task_num}\n")
         lines.append(f"- 执行次数: {task_stats['executions']}")
         lines.append(f"- 成功: {task_stats['successes']}, 失败: {task_stats['failures']}")
+
+        lines.append(f"- 阻塞: {task_stats['blocked']}，分类: {json.dumps(task_stats['blocked_categories'], ensure_ascii=False)}")
+        if task_stats['last_execution'].get('blocked_reason'):
+            lines.append(f"- 最近阻塞原因: {task_stats['last_execution']['blocked_reason']}")
 
         if task_stats["avg_duration_seconds"]:
             avg = task_stats["avg_duration_seconds"]

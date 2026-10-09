@@ -282,7 +282,7 @@ def render_markdown(document: dict) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def read_tasks_document(task_file: str | Path = DEFAULT_TASKS_MD) -> dict:
+def read_tasks_document(task_file: str | Path = DEFAULT_TASKS_MD, *, migrate: bool = True) -> dict:
     paths = resolve_task_paths(task_file)
     if paths.json_path.exists():
         try:
@@ -297,7 +297,8 @@ def read_tasks_document(task_file: str | Path = DEFAULT_TASKS_MD) -> dict:
 
     markdown = paths.markdown_path.read_text(encoding="utf-8")
     document = parse_markdown(markdown, paths)
-    atomic_write(paths.json_path, json.dumps(document, ensure_ascii=False, indent=2) + "\n")
+    if migrate:
+        atomic_write(paths.json_path, json.dumps(document, ensure_ascii=False, indent=2) + "\n")
     return document
 
 
@@ -347,7 +348,8 @@ def has_dependencies(deps) -> bool:
 
 def dependency_satisfied(tasks: list[dict], dep_num: str) -> bool:
     task = find_task({"tasks": tasks}, dep_num)
-    return bool(task and task.get("status") in ("DONE", "VERIFIED"))
+    from task_board import integration_valid
+    return bool(task and integration_valid(task))
 
 
 def all_dependencies_satisfied(tasks: list[dict], deps) -> bool:
