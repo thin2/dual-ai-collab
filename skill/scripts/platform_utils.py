@@ -11,6 +11,14 @@ import sys
 import time
 from pathlib import Path
 
+# Ensure UTF-8 output on Windows console (avoids cp936/GBK encoding issues)
+if sys.platform == 'win32' and hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except (AttributeError, OSError):
+        pass
+
 IS_WINDOWS = os.name == "nt"
 
 # Process status cache: {pid: (is_running, timestamp)}

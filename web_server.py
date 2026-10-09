@@ -15,7 +15,10 @@ sys.path.insert(0, str(REPO_ROOT / 'skill/scripts'))
 import task_manager
 import task_board
 import tasks_store
+import run_task
+import run_store
 from project_context import ProjectRegistry, ProjectError
+from tasks_store import CliError
 
 VALID_STATUSES = frozenset({
     'TODO', 'OPEN', 'IN_PROGRESS', 'AWAITING_REVIEW', 'AWAITING_INTEGRATION',
@@ -153,6 +156,71 @@ def create_app(repo_root=None, registry_file=None):
             records.append(record)
         records.sort(key=lambda record: record.get('start_time') or '', reverse=True)
         return jsonify(success=True, history=records)
+
+    @app.get('/api/runs/<task_id>')
+    @app.get('/api/projects/<project_id>/runs/<task_id>')
+    def get_run_status(task_id, project_id='default'):
+        """Get current execution status for a task."""
+        project = registry.get(project_id)
+        os.chdir(str(project.root))
+        try:
+            record = run_store.read_run_record(task_id)
+            if not record:
+                abort(404, description='No run record found')
+            record = run_store.update_run_status(record)
+            return jsonify(success=True, run=record)
+        except CliError as exc:
+            abort(400, description=str(exc))
+
+    @app.post('/api/runs/<task_id>/start')
+    @app.post('/api/projects/<project_id>/runs/<task_id>/start')
+    def start_run(task_id, project_id='default'):
+        """Start task execution."""
+        project = registry.get(project_id)
+        data = request.get_json() or {}
+        os.chdir(str(project.root))
+
+        # Build arguments for run_task.cmd_start
+        class Args:
+            def __init__(self):
+                self.task_num = task_id
+                self.prompt = data.get('prompt')
+                self.prompt_file = data.get('prompt_file')
+                self.backend = data.get('backend', 'direct')
+                self.workdir = data.get('workdir')
+                self.model = data.get('model')
+                self.effort = data.get('effort')
+                self.sandbox = data.get('sandbox')
+                self.context_task_file = str(project.task_file)
+                self.isolate = data.get('isolate', False)
+                self.timeout = data.get('timeout')
+                self.no_structured = data.get('no_structured', False)
+
+        try:
+            args = Args()
+            result = run_task.cmd_start(args)
+            if result == 0:
+                record = run_store.read_run_record(task_id)
+                return jsonify(success=True, message=f'任务 {task_id} 已启动', run=record)
+            else:
+                abort(500, description='Failed to start task')
+        except CliError as exc:
+            abort(400, description=str(exc))
+
+    @app.post('/api/runs/<task_id>/stop')
+    @app.post('/api/projects/<project_id>/runs/<task_id>/stop')
+    def stop_run(task_id, project_id='default'):
+        """Stop running task."""
+        project = registry.get(project_id)
+        os.chdir(str(project.root))
+        try:
+            result = run_store.stop_task(task_id)
+            if result:
+                return jsonify(success=True, message=f'任务 {task_id} 已停止', run=result)
+            else:
+                abort(404, description='No running task found')
+        except CliError as exc:
+            abort(400, description=str(exc))
 
     @app.get('/')
     @app.get('/project/<project_id>/tasks')
