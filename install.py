@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -30,7 +32,21 @@ def copy_tree(src: Path, dst: Path) -> None:
             copy_file(path, target)
 
 
-def install(target_dir: Path, source_root: Path, force: bool) -> None:
+def install(target_dir: Path, source_root: Path, force: bool, profile: str = "full") -> None:
+    if profile not in {"full", "planning"}:
+        raise ValueError(f"Unknown profile: {profile}")
+    if profile == "planning":
+        source = source_root / "skills" / "dual-ai-planning"
+        if not (source / "SKILL.md").is_file():
+            raise FileNotFoundError(source / "SKILL.md")
+        if target_dir.exists() and any(target_dir.iterdir()) and not force:
+            raise RuntimeError(f"目标目录已存在且非空: {target_dir}；覆盖需 --force")
+        copy_tree(source, target_dir)
+        (target_dir / "source.json").write_text(
+            json.dumps({"repository": str(source_root.resolve())}, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return
     skill_root = source_root / "skill"
     skill_file = skill_root / "dual-ai-collab.md"
     scripts_dir = skill_root / "scripts"
@@ -46,7 +62,7 @@ def install(target_dir: Path, source_root: Path, force: bool) -> None:
         )
 
     target_dir.mkdir(parents=True, exist_ok=True)
-    copy_file(skill_file, target_dir / "dual-ai-collab.md")
+    copy_file(skill_file, target_dir / "SKILL.md")
     copy_tree(scripts_dir, target_dir / "scripts")
     copy_tree(references_dir, target_dir / "references")
 
@@ -55,8 +71,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Install the Dual AI Collaboration skill")
     parser.add_argument(
         "--target",
-        default="~/.claude/skills/dual-ai-collab",
-        help="安装目录（默认：~/.claude/skills/dual-ai-collab）",
+        default=None,
+        help="安装目录（默认：full 安装到 Claude，planning 安装到 Codex）",
     )
     parser.add_argument(
         "--source",
@@ -68,13 +84,17 @@ def main() -> None:
         action="store_true",
         help="覆盖已存在的安装目录内容",
     )
+    parser.add_argument("--profile", choices=("full", "planning"), default="full",
+                        help="planning 只安装规划与任务板技能，复用本地仓库")
     args = parser.parse_args()
 
     source_root = Path(args.source).expanduser().resolve()
-    target_dir = Path(args.target).expanduser().resolve()
+    default_target = (Path(os.environ.get("CODEX_HOME") or "~/.codex") / "skills" / "dual-ai-planning"
+                      if args.profile == "planning" else Path("~/.claude/skills/dual-ai-collab"))
+    target_dir = Path(args.target or default_target).expanduser().resolve()
 
     try:
-        install(target_dir, source_root, force=args.force)
+        install(target_dir, source_root, force=args.force, profile=args.profile)
     except (FileNotFoundError, RuntimeError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         raise SystemExit(1)

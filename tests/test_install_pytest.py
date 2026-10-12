@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sys
+import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,6 +14,34 @@ import install  # noqa: E402
 
 
 class InstallTests(unittest.TestCase):
+    def test_planning_profile_works_in_target_project_without_model_cli(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "installed-skill"
+            project = Path(tmp) / "project"
+            project.mkdir()
+            install.install(target, ROOT, force=False, profile="planning")
+            self.assertTrue((target / "SKILL.md").exists())
+            self.assertFalse((target / "scripts" / "run_task.py").exists())
+            self.assertEqual(json.loads((target / "source.json").read_text())["repository"], str(ROOT))
+            tool = [sys.executable, str(target / "scripts" / "planning.py")]
+            def run(*args):
+                return subprocess.run(tool + list(args), cwd=project, capture_output=True, text=True)
+            self.assertEqual(run("init").returncode, 0)
+            created = run("templates", "create", "docs", "001", "--var", "topic=Smoke", "--add")
+            self.assertEqual(created.returncode, 0, created.stdout + created.stderr)
+            self.assertTrue((project / "planning" / "tasks.json").exists())
+            self.assertTrue((project / "planning" / "codex-tasks.md").exists())
+            board = run("board", "show", "--json")
+            self.assertEqual(board.returncode, 0, board.stderr)
+            self.assertEqual(json.loads(board.stdout)[0]["id"], "001")
+            self.assertEqual(run("board", "context", "001").returncode, 0)
+            self.assertEqual(run("update", "001", "IN_PROGRESS").returncode, 0)
+            self.assertEqual(run("checkpoint-write", "developing", "current_task=001").returncode, 0)
+            self.assertIn("001", run("checkpoint-check").stdout)
+            self.assertNotEqual(run("run", "start", "001", "unused").returncode, 0)
+            self.assertNotEqual(run("check-adapters").returncode, 0)
+            self.assertFalse((target / "planning").exists())
+
     def test_install_copies_skill_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "installed-skill"
