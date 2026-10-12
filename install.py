@@ -33,8 +33,21 @@ def copy_tree(src: Path, dst: Path) -> None:
 
 
 def install(target_dir: Path, source_root: Path, force: bool, profile: str = "full") -> None:
-    if profile not in {"full", "planning"}:
+    if profile not in {"full", "planning", "task-management"}:
         raise ValueError(f"Unknown profile: {profile}")
+    
+    # Task management profile (Droid native)
+    if profile == "task-management":
+        source = source_root / "task-management"
+        if not (source / "SKILL.md").is_file():
+            raise FileNotFoundError(source / "SKILL.md")
+        if target_dir.exists() and any(target_dir.iterdir()) and not force:
+            raise RuntimeError(f"目标目录已存在且非空: {target_dir}；覆盖需 --force")
+        copy_tree(source, target_dir)
+        print("提示：该技能使用原生 Droid Task 工具调度执行")
+        return
+    
+    # Planning profile (Codex)
     if profile == "planning":
         source = source_root / "skills" / "dual-ai-planning"
         if not (source / "SKILL.md").is_file():
@@ -84,13 +97,24 @@ def main() -> None:
         action="store_true",
         help="覆盖已存在的安装目录内容",
     )
-    parser.add_argument("--profile", choices=("full", "planning"), default="full",
-                        help="planning 只安装规划与任务板技能，复用本地仓库")
+    parser.add_argument(
+        "--profile",
+        choices=("full", "planning", "task-management"),
+        default="task-management",
+        help="task-management: Droid 原生任务管理 (默认), planning: Codex 规划技能, full: 完整 dual-ai-collab"
+    )
     args = parser.parse_args()
 
     source_root = Path(args.source).expanduser().resolve()
-    default_target = (Path(os.environ.get("CODEX_HOME") or "~/.codex") / "skills" / "dual-ai-planning"
-                      if args.profile == "planning" else Path("~/.claude/skills/dual-ai-collab"))
+    
+    # 确定默认安装路径
+    if args.profile == "task-management":
+        default_target = Path(os.environ.get("FACTORY_SKILLS") or "~/.factory/skills") / "task-management"
+    elif args.profile == "planning":
+        default_target = Path(os.environ.get("CODEX_HOME") or "~/.codex") / "skills" / "dual-ai-planning"
+    else:
+        default_target = Path("~/.claude/skills/dual-ai-collab")
+    
     target_dir = Path(args.target or default_target).expanduser().resolve()
 
     try:
