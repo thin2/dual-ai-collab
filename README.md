@@ -146,6 +146,8 @@ skill/
 │   ├── audit.md                # 审计规则和报告格式
 │   ├── prompt-templates.md     # 阶段化提示词模板
 │   ├── recovery.md             # 对话压缩/中断后的恢复指引
+│   ├── grill-me-integration.md # 对抗性质疑集成（grill-me 可选，缺失时 Claude 手工执行）
+│   ├── execution-optimization.md # 任务检查点、修复决策、Mock 并行、缺陷模式库
 │   └── troubleshooting.md      # 故障排查
 └── scripts/                    # 辅助脚本
     ├── cli.py                  # 跨平台统一入口
