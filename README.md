@@ -84,7 +84,7 @@ python3 install.py --profile full
 | 需要 Claude+Codex 完整协作 | **dual-ai-collab** | 功能最全 |
 | 从旧版本迁移 | **task-management** | 向后兼容，架构更简单 |
 
-## Web UI（所有版本共享）
+## Web UI（Task Management）
 
 可选的任务监控界面：
 
@@ -93,7 +93,20 @@ python3 web_server.py 5001
 open http://localhost:5001
 ```
 
-支持多项目管理和任务状态可视化。
+界面只支持新版 `task-management/lib`，提供多项目任务监控、执行历史和团队页（`/team`）。
+任务可查看角色、固定模型、失败次数、依赖和集成确认；`DONE` 只有带有集成记录才计为完成。
+Web 可更新待办、进行中、待验收、待集成、拒绝、阻塞和失败状态，完成任务需通过技能的 `integrate`。
+
+团队页只用于监控：查看角色与模型、手动检查连接、核对最近子 Agent 的实际模型，并预览下一批及跳过原因。
+连接检查仅验证 droid 配置、BYOK 模型登记和服务 TCP 连接，不代表模型请求或鉴权成功；
+没有核对记录表示尚未核对。页面不会启动子 Agent 或编辑模型。
+
+项目登记保存在 `.task-management/projects.json`，可用环境变量 `TASK_MANAGEMENT_PROJECTS_FILE` 指定独立注册表。
+默认项目 API 为 `/api/<resource>`，其他项目为 `/api/projects/<project_id>/<resource>`；
+任务读取 `planning/tasks.json`（库内兼容 `codex-tasks.json`），配置和历史分别读取
+`.task-management/config.json`、`.task-management/history/*.json`。
+GET 请求不会初始化项目文件；旧注册表、旧运行记录和旧 run API 不再使用。
+服务只监听 `127.0.0.1`，拒绝跨站修改请求，并检查数据路径不会经符号链接越出项目。
 
 ## 迁移指南
 
