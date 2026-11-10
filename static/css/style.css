@@ -42,9 +42,12 @@ h1 { font-family: var(--serif); font-size: clamp(32px, 4vw, 44px); font-weight: 
 .task-id { font-family: var(--serif); font-size: 15px; color: var(--muted); position: absolute; left: 0; top: 28px; }
 .task-status { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; color: var(--muted); line-height: 1.5; white-space: nowrap; }
 .task-status::before { content: ''; width: 5px; height: 5px; background: currentColor; border-radius: 50%; flex-shrink: 0; }
+.task-status.PENDING { color: #756e62; }
+.task-status.TODO, .task-status.OPEN { color: #756e62; }
 .task-status.IN_PROGRESS { color: #516879; }
 .task-status.AWAITING_REVIEW, .task-status.AWAITING_INTEGRATION { color: #8c672e; }
 .task-status.DONE, .task-status.VERIFIED { color: #52644b; }
+.task-status.BLOCKED { color: #8c672e; }
 .task-status.FAILED, .task-status.REJECTED { color: var(--accent); }
 .task-title { font-family: var(--serif); font-size: 21px; font-weight: 500; line-height: 1.5; margin-bottom: 8px; overflow-wrap: anywhere; }
 .task-meta { display: flex; gap: 20px; flex-wrap: wrap; color: var(--muted); font-size: 11px; }
@@ -73,6 +76,9 @@ h1 { font-family: var(--serif); font-size: clamp(32px, 4vw, 44px); font-weight: 
 /* Project navigation uses the same paper and ink as the task journal. */
 .project-bar { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 18px 0; border-bottom: 1px solid var(--line); }
 .project-picker { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1; }
+.project-nav { display: flex; gap: 16px; }
+.project-nav .nav-link { color: var(--muted); text-decoration: none; font-size: 13px; padding: 6px 12px; border-radius: 2px; transition: background-color .15s, color .15s; }
+.project-nav .nav-link:hover { color: var(--ink); background: var(--paper-shade); }
 .project-picker label { font-size: 11px; color: var(--muted); white-space: nowrap; }
 .project-picker select { max-width: 240px; min-width: 100px; border: 0; border-bottom: 1px solid var(--line); color: var(--ink); background: var(--paper); padding: 6px 18px 6px 0; border-radius: 0; }
 .project-path { color: var(--muted); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -89,5 +95,7 @@ h1 { font-family: var(--serif); font-size: clamp(32px, 4vw, 44px); font-weight: 
     .project-path { display: none; }
     .project-picker { gap: 8px; }
     .project-picker select { max-width: 160px; min-width: 0; width: 100%; }
+    .project-nav { gap: 12px; }
+    .project-nav .nav-link { font-size: 12px; padding: 4px 8px; }
     .register-fields { grid-template-columns: 1fr; }
 }

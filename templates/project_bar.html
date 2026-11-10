@@ -8,13 +8,17 @@
         </select>
         <span class="project-path" title="{{ project.path }}">{{ project.path }}</span>
     </div>
+    <div class="project-nav">
+        <a href="{{ url_for('index', project_id=project.id) }}" class="nav-link">任务</a>
+        <a href="{{ url_for('team', project_id=project.id) }}" class="nav-link">团队</a>
+    </div>
     <button class="register-toggle" id="registerToggle" aria-expanded="false" aria-controls="registerProject">登记项目 ＋</button>
 </div>
 <form id="registerProject" class="register-project" hidden>
-    <p>登记已有文件夹，任务和记录保留在各自项目中。</p>
+    <p>登记已有文件夹；任务与记录保留在各项目中。</p>
     <div class="register-fields">
         <label>项目名称<input name="name" required maxlength="100" placeholder="例如：客户门户" autocomplete="off"></label>
-        <label>项目目录<input name="path" required placeholder="/Users/你的用户名/projects/项目目录" autocomplete="off" spellcheck="false"></label>
+        <label>项目目录<input name="path" required placeholder="/Users/username/projects/project-directory" autocomplete="off" spellcheck="false"></label>
         <button type="submit" class="register-submit">登记并打开</button>
     </div>
     <p id="projectMessage" role="status"></p>
