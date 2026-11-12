@@ -88,7 +88,7 @@ open http://localhost:5001
 python3 -m pytest tests/ -v
 
 # 只测试 foreman
-python3 -m pytest tests/test_foreman.py tests/test_foreman_team.py tests/test_foreman_workflow.py -v
+python3 -m pytest tests/test_foreman*.py -v
 
 # 只测试安装逻辑
 python3 -m pytest tests/test_install_pytest.py -v
@@ -139,6 +139,7 @@ MIT License
 
 ## 版本历史
 
+- **v3.3** (2026-11) - `foreman` 命令入口；`execution` 命令可以直接写任务 ID；错误提示说明文件、原因和下一步，损坏的配置不再被覆盖；新增 `doctor` 自检和 `--version`
 - **v3.2** (2026-11) - task-management 改名为 foreman；项目里的 `.task-management/` 和 `tm-` 前缀不变
 - **v3.1** (2026-11) - dual-ai-planning 并入 task-management：没写角色的任务由当前会话直接执行
 - **v3.0** (2026-10) - 添加 task-management 技能（Droid 原生）

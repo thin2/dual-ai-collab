@@ -202,8 +202,12 @@ foreman plan-execution 001 --json
 # 初始化
 foreman init
 
+# 自检和版本
+foreman doctor               # 只读：环境、任务板、配置、checkpoint、执行记录；有问题时退出码 1
+foreman --version
+
 # 写入和查看任务
-foreman add --file planning/plan.json [--replace]
+foreman add --file planning/plan.json           # 加 --replace 改写待开始的同号任务
 foreman show                 # 任务板
 foreman show 001             # 单个任务的完整上下文、当前状态和下一步命令
 foreman show --mermaid       # 依赖图
@@ -230,6 +234,7 @@ foreman execution finish 001 --outcome completed   # 任务 ID 或 execution_id 
 # Checkpoint 管理
 foreman checkpoint check
 foreman checkpoint save --phase developing --data current_task=001
+foreman checkpoint clear
 
 # 查看历史
 foreman history
@@ -241,7 +246,7 @@ foreman acceptance 001 --template
 
 # 固定模型团队和并行派发
 foreman models
-foreman team set|show|remove|check|audit
+foreman team show            # 另有 set、remove、check、audit
 foreman batch --json
 foreman fail 001 --reason "..."
 foreman integrate 001 --commit <SHA>
@@ -255,6 +260,7 @@ foreman execution finish <execution_id> --outcome interrupted
 foreman execution audit <execution_id>
 foreman execution accept <execution_id> --evidence-file planning/acceptance-001.json
 foreman execution retry <execution_id> --reason "保留部分成果，继续剩余工作"
+foreman execution block <execution_id> --reason "实际模型不符，等用户处理"
 foreman execution unblock <execution_id> --reason "用户已处理阻塞原因"
 foreman execution sync
 foreman delivery --commit HEAD --paths <运行依赖路径...>
@@ -265,7 +271,7 @@ foreman delivery --commit HEAD --paths <运行依赖路径...>
 在仓库根目录运行：
 
 ```bash
-python3 -m pytest tests/test_foreman.py tests/test_foreman_team.py tests/test_foreman_workflow.py tests/test_install_pytest.py -q
+python3 -m pytest tests/test_foreman*.py tests/test_install_pytest.py -q
 ```
 
 ## 迁移指南
@@ -355,6 +361,12 @@ open http://localhost:5001
 
 ## 故障排查
 
+### 不知道哪里出了问题
+```bash
+foreman doctor
+```
+只读自检，逐项列出环境和项目数据的状态；“问题”一项会让命令用不了，退出码为 1。
+
 ### 任务板不存在
 ```bash
 foreman init
@@ -381,7 +393,7 @@ foreman init
 任务板、配置和执行记录损坏时，命令报出文件和位置后停下，不改动文件；修好 JSON 或从 git、备份恢复。配置损坏时 `init` 不会覆盖它，因为里面可能有角色。checkpoint 损坏时运行 `foreman execution sync`，原文件会另存为 `checkpoint.json.corrupted`。
 
 ### 依赖循环
-`add` 不检查依赖。运行 `foreman validate` 列出依赖环、不存在的依赖和缺失的字段；batch 无可执行任务时检查 skipped，不把依赖阻塞当作全部完成。
+`add` 写入后只列出这批任务自己的问题，不检查整个任务板。运行 `foreman validate` 列出依赖环、不存在的依赖和缺失的字段；batch 无可执行任务时检查 skipped，不把依赖阻塞当作全部完成。
 
 ## 架构
 
@@ -398,6 +410,7 @@ foreman/
 │   ├── history.py       # 执行历史
 │   ├── workflow.py      # 文件基线、恢复、验收、交付检查
 │   ├── plan.py          # 规划检查（validate）
+│   ├── doctor.py        # 只读自检（doctor）和版本
 │   ├── team.py          # 固定模型角色与模型目录
 │   ├── runner.py        # 嵌套 Task 派发与自动记录
 │   ├── safety.py        # 单次运行的原生沙箱配置

@@ -1,6 +1,7 @@
 ---
 name: foreman
-description: 需求规划、任务拆分、依赖分析、任务板维护、断点恢复和执行管理。适用于用户要求制定开发计划、建立或继续任务板；任务可以由当前会话直接实现，也可以派给用户选定模型的固定角色并行执行。
+description: 需求规划、任务拆分、依赖分析、任务板维护、断点恢复和执行管理。适用于用户要求制定开发计划、建立或继续任务板；任务可以由当前会话直接实现，也可以派给用户选定模型的固定角色并行执行。一两步就能做完的修改、问答和代码讲解不使用本技能。
+version: 3.3.0
 ---
 
 # Foreman：任务管理技能
@@ -44,9 +45,12 @@ foreman checkpoint check   # 有没有上次留下的进度
 foreman show               # 任务板：编号、状态、由谁执行、还在等哪些依赖
 foreman show 001           # 单个任务的上下文、当前状态和下一步要运行的命令
 foreman init               # 新项目：创建 planning/、.task-management/ 和空任务板
+foreman doctor             # 只读自检：环境、任务板、配置、checkpoint 和执行记录；命令报错又看不出原因时先运行
 ```
 
 任务数据在 `planning/tasks.json`，`planning/tasks.md` 是每次写入时生成的视图，不要手改。规划、任务板和当前会话直接执行只用 Python 标准库和 git；派发还需要 Droid。
+
+`planning/` 和 `.task-management/` 是否提交由项目决定，有两条要守住。任务板和 `.task-management/history/` 要么都提交，要么都不提交：只提交任务板时，别的检出里 `begin` 过的任务找不到自己的执行记录。`*.lock`、`*.corrupted` 和 `.task-management/sandbox-probe.json` 只对本机有意义，放进 `.gitignore`。
 
 `execution` 的 `finish`、`inspect`、`audit`、`accept`、`retry`、`block`、`unblock` 都可以直接写任务 ID，表示这个任务当前的执行记录；写 `execution_id` 也可以，用来查看已被替代的旧记录。下文的 `<execution_id>` 两种写法都行。
 
@@ -165,7 +169,7 @@ foreman add --file planning/plan.json --replace   # 改写同编号的任务，�
 foreman show 001                                  # 写入后的完整任务上下文
 ```
 
-新任务的状态固定从 PENDING 开始，之后的状态由执行流程写入。`--replace` 用于修改规划：只能改待开始（含等待返工）的任务，返工记录会保留。
+新任务的状态固定从 PENDING 开始，之后的状态由执行流程写入。`--replace` 用于修改规划：只能改待开始（含等待返工）的任务，返工记录会保留。写入后 `add` 会列出这批任务里执行前要补齐的地方（缺字段、依赖的任务不存在等）；任务已经写入，改好文件后用 `--replace` 重新写入。
 
 每个任务都要有 `files`、`runtime_dependencies`、结构化 `acceptance` 和任务描述（`description` 或带正文的 section）。要派发的任务另外写 `role`；不写 `role` 就由当前会话直接执行。`files` 和 `runtime_dependencies` 必须是字符串列表。`acceptance` 每项有 id、scenario、expected、method（command、browser 或 manual），命令检查另加 command。验收条件只写在 `acceptance` 里，不要在 sections 里再写一份“验收标准”：执行者会同时看到两份，而验收只按 `acceptance` 进行。
 
@@ -236,7 +240,7 @@ foreman checkpoint save --phase developing --data spec_file=planning/specs/<规�
    每个角色会生成 `.factory/droids/tm-<角色>.md`，`model` 写的是 settings 里的模型 ID，能精确指定线路。同时写入 `.task-management/config.json` 的 `roles`。
 5. **新角色需要新会话加载。** 受管 `run` 每次启动新的嵌套 Droid 会话，无需让用户重开主会话。直接使用当前会话 Task 时，先确认工具目录包含该角色；缺失则保存 checkpoint，重开会话，不换成其他角色。
 
-换模型：仅在用户指定新模型后重新运行 `team set`。新派发会加载新配置，旧执行仍按当时固定的模型审计。
+换模型：仅在用户指定新模型后重新运行 `team set`。新派发会加载新配置，旧执行仍按当时固定的模型审计。`team show` 列出已配置的角色和模型，`team remove <角色>` 删除角色和它的 droid 文件。
 
 组队后再运行一次 `foreman validate`，全部通过才进入执行阶段。
 
@@ -429,6 +433,20 @@ foreman show
 
 不要 reset、checkout 或删除部分成果。用同一结果重复执行 `execution finish` 是安全的，会补上中断时没写完的任务板状态。`recover` 中 `current` 为 false 的记录已被后续执行替代，仅供查阅。`execution sync` 可修复 checkpoint，保留规格路径等已有上下文。
 
+### 7. 收尾
+
+`batch` 没有可开始的任务不等于做完了。向用户汇报前逐项确认：
+
+```bash
+foreman show                # 每个任务都是 DONE；不是的要说明停在哪一步、为什么
+foreman execution recover   # 没有 current 为 true 的记录，即没有做完却还没集成的执行
+foreman doctor              # 没有“问题”
+```
+
+- 全部任务集成后，把项目自己的完整测试和构建再跑一遍。每个任务的验收只覆盖它自己的条件，任务之间的相互影响靠这一步发现。失败就开新任务修复，已经 DONE 的任务不能改写。
+- 汇报写清四件事：完成了哪些任务和对应的提交；没完成或 BLOCKED 的任务及原因；实际运行过的验证命令和结果，没运行的如实说明；还需要用户做的事，例如推送、合并或处理阻塞。
+- 全部任务集成后 checkpoint 的阶段会自动变成 completed，不需要手工清除；还有任务没完成时不要清除它。
+
 ## 配置系统
 
 配置文件是 `.task-management/config.json`：
@@ -482,6 +500,12 @@ foreman show --mermaid > planning/dependencies.mmd   # 依赖图，箭头从被�
 
 ## 故障排查
 
+### 不知道哪里出了问题
+```bash
+foreman doctor    # 加 --json 输出结构化结果
+```
+它只读不写，逐项列出 Python、git、`foreman` 是否在 PATH、任务板、配置、checkpoint、执行记录，以及派发需要的 droid、模型配置和角色。“问题”一项会让命令用不了，退出码为 1；“注意”不影响当前能做的事。规划本身的问题仍用 `validate`。
+
 ### 任务板不存在
 ```bash
 foreman init
@@ -506,7 +530,7 @@ foreman init
 ```bash
 foreman validate
 ```
-`add` 不检查依赖；`validate` 会列出依赖环、不存在的依赖和缺失的字段。
+`add` 写入后只列出这批任务自己的问题；`validate` 检查整个任务板，会列出依赖环、不存在的依赖和缺失的字段。
 
 ### 派发结果是 permission_rejected
 子 Agent 调用了不被允许的操作，整次派发被终止，常见原因是把命令标成了 high 风险。先 `execution inspect` 看已经写入了什么（被终止前的文件会保留），再决定验收还是 `execution retry` 并在原因里写明不要做哪类操作。不要改用 `--skip-permissions-unsafe`。
@@ -534,7 +558,13 @@ Task 报 `Droid configuration not found` 时：
 可选的任务监控界面，见仓库中的 `web_server.py`。
 
 ### CLI 工具
-`bin/foreman` 是命令行入口（等同于 `python3 tools/cli.py`），可以在脚本和 CI 里调用。
+`bin/foreman` 是命令行入口（等同于 `python3 tools/cli.py`），可以在脚本和 CI 里调用。`foreman --version` 输出本技能的版本，也就是本文件开头的 `version`。
+
+退出码：
+- 0：成功。
+- 1：命令被拒绝或出错，原因在标准错误输出以“错误:”开头的一行；`validate` 和 `doctor` 发现问题时也是 1。
+- 2：检查没有通过，结果在标准输出里：`preflight`、`run`、`team check`、`team audit`、`execution audit`、`delivery`。命令行参数写错时也是 2，标准错误输出里有 usage。
+- 130：被中断。
 
 ### Git 集成
 任务完成后，建议的提交流程：

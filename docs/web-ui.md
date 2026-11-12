@@ -93,12 +93,13 @@ GET  /api/specs/<文件名>                    规划文档内容（超过 1 MiB
 先确认顶部选的是哪个项目：默认项目是本仓库，不是你正在开发的项目。其他项目要先登记，登记的路径应是项目根目录（有 `planning/tasks.json` 的那一层）。
 
 ### 页面显示 Internal server error
-服务不把错误细节发给页面，也不写进终端日志，避免泄露文件内容。通常是项目里某个数据文件不是合法的 JSON：
+服务不把错误细节发给页面，也不写进终端日志，避免泄露文件内容。通常是项目里某个数据文件不是合法的 JSON。在项目目录运行：
 
-- 任务板：在项目目录运行 `foreman show`，损坏时会报出文件和位置。
-- 配置：运行 `foreman config show`，损坏时会报出文件和位置。
-- checkpoint：运行 `foreman checkpoint check`；损坏时 `foreman execution sync` 会把原文件另存为 `checkpoint.json.corrupted`，再按任务板重建进度。
-- 执行记录：`foreman history` 会在标准错误输出里列出读不出来的 `.task-management/history/*.json`。
+```bash
+foreman doctor
+```
+
+它只读不写，会列出读不出来的任务板、配置、checkpoint 和执行记录，以及各自的出错位置和处理办法。checkpoint 损坏时运行 `foreman execution sync`：原文件另存为 `checkpoint.json.corrupted`，进度按任务板重建。
 
 ### 项目未登记（404）或项目目录不存在（409）
 404 表示地址里的项目 ID 不在注册表里，回到首页重新选择。409 表示登记的目录不存在或已变成符号链接；恢复目录，或者用新路径重新登记。

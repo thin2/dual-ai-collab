@@ -28,6 +28,7 @@ from lib import (  # noqa: E402
     remove_role,
     write_tasks_document,
 )
+from lib.doctor import diagnose, skill_version  # noqa: E402
 from lib.plan import KNOWN_STATUSES, check_plan  # noqa: E402
 from lib.store import (  # noqa: E402
     DEFAULT_TASKS_MD,
@@ -69,7 +70,8 @@ def resolve_root(command: str) -> Path:
         return cwd
     found = find_project_root(cwd)
     if found is None:
-        if command != "models":
+        # models 不需要项目；doctor 自己会报告没有找到项目
+        if command not in ("models", "doctor"):
             print(f"提示: {cwd} 及其上级目录没有任务板或配置，按当前目录处理；新项目先运行 {CLI} init", file=sys.stderr)
         return cwd
     if found != cwd:
@@ -176,6 +178,16 @@ def cmd_add(args):
         raise ValueError("文件内容应是一个任务对象、任务列表，或 {\"tasks\": [...]}")
     written = TaskBoard.load(args.root).add_tasks(tasks, replace=args.replace)
     print(f"已写入 {len(written)} 个任务: {'、'.join(written)}")
+    # 任务已经写入；这里只是把 validate 会对它们报的问题提前说出来
+    try:
+        problems = [item for item in check_plan(args.root)["board"] if item["task"] in written]
+    except ValueError as error:
+        problems = []
+        print(f"注意: 没能运行规划检查（{error}）", file=sys.stderr)
+    if problems:
+        print(f"其中 {len(problems)} 处要在执行前补齐（改好文件后用 add --replace 重新写入）：")
+        for item in problems:
+            print(f"  {item['task']} {item['field']}: {item['problem']}")
     print(f"接着运行 {CLI} validate 检查字段、依赖和角色")
 
 
@@ -664,11 +676,36 @@ def cmd_delivery(args):
         sys.exit(2)
 
 
+LEVEL_LABELS = {"ok": "正常", "note": "注意", "problem": "问题"}
+
+
+def cmd_doctor(args):
+    """只读自检：环境和项目数据里有什么会让命令用不了"""
+    cwd = Path.cwd()
+    items = diagnose(find_project_root(cwd), cwd)
+    problems = sum(item["level"] == "problem" for item in items)
+    if args.json:
+        _print_json({"ok": not problems, "items": items})
+    else:
+        for item in items:
+            print(f"[{LEVEL_LABELS[item['level']]}] {item['name']}: {item['detail']}")
+            if item["fix"]:
+                print(f"       处理: {item['fix']}")
+        notes = sum(item["level"] == "note" for item in items)
+        print(f"\n{problems} 个问题，{notes} 个注意事项。"
+              f"规划本身的问题用 {CLI} validate 检查，模型服务能否连通用 {CLI} team check 检查")
+    if problems:
+        sys.exit(1)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog=CLI, description="Foreman 任务管理 CLI")
+    parser.add_argument("--version", action="version", version=f"{CLI} {skill_version()}")
     subparsers = parser.add_subparsers(dest="command", help="命令")
 
     subparsers.add_parser("init", help="初始化项目")
+    p = subparsers.add_parser("doctor", help="只读自检：环境、任务板、配置、checkpoint 和执行记录；有问题时退出码 1")
+    p.add_argument("--json", action="store_true", help="JSON 输出")
     subparsers.add_parser("select", help="下一个可以开始的任务（batch 的第一项）")
     subparsers.add_parser("status", help="显示任务统计")
 
@@ -808,6 +845,7 @@ def main():
         args.root = resolve_root(args.command)
         cmd_func = {
             "init": cmd_init,
+            "doctor": cmd_doctor,
             "select": cmd_select,
             "status": cmd_status,
             "add": cmd_add,

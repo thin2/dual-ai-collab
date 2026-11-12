@@ -34,6 +34,18 @@ def copy_tree(src: Path, dst: Path) -> None:
 LAUNCHER = Path("bin") / "foreman"
 
 
+def skill_version(skill_dir: Path) -> str | None:
+    """The version in a skill's SKILL.md frontmatter; None when the file or the field is missing."""
+    try:
+        frontmatter = (skill_dir / "SKILL.md").read_text(encoding="utf-8").split("---", 2)[1]
+    except (OSError, ValueError, IndexError):
+        return None
+    for line in frontmatter.splitlines():
+        if line.startswith("version:"):
+            return line.split(":", 1)[1].strip() or None
+    return None
+
+
 def _is_foreman_launcher(path: Path) -> bool:
     skill = path.parent.parent
     return path.name == "foreman" and (skill / "SKILL.md").is_file() and (skill / "tools" / "cli.py").is_file()
@@ -158,6 +170,8 @@ def main() -> None:
     # Only the directory is resolved: the link itself may already exist and must not be followed.
     link = Path(args.bin_dir).expanduser().resolve() / "foreman" if args.bin_dir else None
 
+    replacing = (target_dir / "SKILL.md").is_file()
+    previous = skill_version(target_dir)
     try:
         if link:
             check_link(link)  # before copying, so a refused link leaves nothing half installed
@@ -172,6 +186,10 @@ def main() -> None:
     print(f"source: {source_root}")
     print(f"target: {target_dir}")
     if args.profile == "foreman":
+        replaced = ""
+        if replacing:
+            replaced = f"（替换了 {previous}）" if previous else "（替换了没有版本号的旧版）"
+        print(f"version: {skill_version(target_dir) or '未标注'}{replaced}")
         print("\n".join(launcher_notes(target_dir / LAUNCHER, link)))
 
 
