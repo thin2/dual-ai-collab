@@ -34,7 +34,7 @@ ruff check .
 ruff check --fix .
 
 # 检查 Python 语法
-python -m compileall -q skill/scripts web_server.py install.py
+python -m compileall -q skill/scripts foreman web_server.py web_projects.py install.py
 ```
 
 ## 提交规范

@@ -52,4 +52,4 @@ jobs:
       run: ruff check --output-format=github .
 
     - name: Check Python syntax
-      run: python -m compileall -q skill/scripts web_server.py install.py
+      run: python -m compileall -q skill/scripts foreman web_server.py web_projects.py install.py
