@@ -74,7 +74,7 @@ class TaskExecutor:
         """
         task = self.board.get_task(task_id)
         if not task:
-            raise ValueError(f"Task {task_id} not found")
+            raise ValueError(f"任务 {task_id} 不存在")
         return self._plan(task)
 
     def plan_batch(self) -> dict[str, Any]:

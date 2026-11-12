@@ -66,12 +66,20 @@ def runtime_policy(root: Path, extra_denied: list[Path] | None = None) -> dict:
 
 
 def check_capabilities(executable: str = "droid") -> dict:
-    result = subprocess.run([executable, "exec", "--help"], capture_output=True, text=True, timeout=20,
-                            env=minimal_environment())
+    try:
+        result = subprocess.run([executable, "exec", "--help"], capture_output=True, text=True, timeout=20,
+                                env=minimal_environment())
+    except FileNotFoundError as error:
+        raise ValueError(f"找不到 {executable} 命令：派发和 preflight 要用 Droid CLI，确认它已安装并在 PATH 中。"
+                         "没有 role 的任务不需要它，由当前会话直接执行") from error
+    except subprocess.TimeoutExpired as error:
+        raise ValueError(f"{executable} exec --help 在 {error.timeout:g} 秒内没有返回，无法确认它支持派发需要的参数") from error
     required = ["--settings", "--only-tools", "--output-format", "--model", "--auto"]
     missing = [flag for flag in required if flag not in result.stdout]
-    if result.returncode or missing:
-        raise ValueError("Droid 缺少必要运行参数，不能安全派发: " + ", ".join(missing))
+    if missing:
+        raise ValueError("Droid 缺少必要运行参数，不能安全派发: " + ", ".join(missing) + "；升级 Droid 后重试")
+    if result.returncode:
+        raise ValueError(f"{executable} exec --help 以退出码 {result.returncode} 结束，无法确认它支持派发需要的参数")
     return {"ok": True, "flags": required,
             "scope": "仅验证 CLI 参数；沙箱必须额外通过非敏感探针验证"}
 

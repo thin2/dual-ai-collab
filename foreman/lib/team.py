@@ -11,8 +11,10 @@ from urllib.parse import urlparse
 
 try:
     from .config import ExecutionConfig
+    from .store import describe_error
 except ImportError:
     from config import ExecutionConfig
+    from store import describe_error
 
 DROID_PREFIX = "tm-"
 MANAGED_MARKER = "<!-- managed-by: task-management -->"
@@ -54,9 +56,18 @@ def _endpoint(base_url: str) -> tuple[str, int] | None:
 def _load_custom_models(settings_path: Path | None) -> list[dict]:
     path = Path(settings_path or DEFAULT_SETTINGS)
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise TeamError(f"无法读取模型配置 {path}: {exc}") from exc
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        raise TeamError(f"找不到模型配置 {path}。角色和派发只使用你自己在 Droid 里配置的模型（BYOK）："
+                        "先在 Droid 中添加自定义模型，它们会写进这个文件的 customModels") from exc
+    except (OSError, ValueError) as exc:
+        raise TeamError(f"无法读取模型配置 {path}: {describe_error(exc)}") from exc
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        raise TeamError(f"模型配置 {path} 不是合法的 JSON（{describe_error(exc)}）；修好它后重试") from exc
+    if not isinstance(data, dict):
+        raise TeamError(f"模型配置 {path} 的内容应是 JSON 对象")
     entries = []
     for entry in data.get("customModels") or []:
         if isinstance(entry, dict) and entry.get("model"):
@@ -182,6 +193,9 @@ def _reachable(endpoint: tuple[str, int], timeout: float) -> bool:
 def check_team(project_root: Path, settings_path: Path | None = None, timeout: float = 3.0) -> list[dict]:
     """派发前检查每个角色：droid 文件、模型是否仍在 BYOK 列表、模型服务是否能连通。"""
     roles = ExecutionConfig(Path(project_root)).get_roles()
+    if not roles:
+        # 没有角色就不需要模型配置：只直接执行的项目可以没有 settings.json
+        return []
     endpoints = {_model_id(e): _endpoint(e.get("baseUrl", "")) for e in _load_custom_models(settings_path)}
     results = []
     for role, entry in sorted(roles.items()):

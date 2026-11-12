@@ -11,6 +11,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from .board import TaskBoard
 from .config import ExecutionConfig
 from .probe import verify_receipt
 from .safety import (
@@ -67,20 +68,23 @@ def run_task(root: Path, task_id: str, dispatcher: str, timeout: int = 1800,
     if timeout <= 0:
         raise ValueError("timeout 必须大于 0")
     root = root.resolve()
-    if dispatcher not in {m["id"] for m in list_byok_models(settings_path)}:
-        raise ValueError("调度模型必须是用户选定的完整 BYOK ID")
-    check_capabilities(executable)
-    workflow = Workflow(root)
-    task = workflow.board.get_task(task_id)
+    # The task comes first: one without a role needs neither a dispatcher model nor droid.
+    task = TaskBoard.load(root).get_task(task_id)
     if not task:
-        raise ValueError("任务不存在")
+        raise ValueError(f"任务 {task_id} 不存在")
     if not task.get("role"):
         raise ValueError("任务没有 role，由当前会话直接执行：用 execution begin 登记后自己实现；"
                          "要派发就先给任务写上 role")
+    if dispatcher not in {m["id"] for m in list_byok_models(settings_path)}:
+        raise ValueError(f"调度模型 {dispatcher} 不在已配置的模型里：必须是用户选定的完整 BYOK ID，"
+                         "即 foreman models 的第一列")
+    check_capabilities(executable)
     checks = [c for c in check_team(root, settings_path=settings_path) if c["role"] == task.get("role")]
     if not checks or not all(c["ok"] for c in checks):
-        raise ValueError("任务角色预检失败；不能自动换模型")
+        problems = "；".join(p for c in checks for p in c["problems"]) or f"角色 {task['role']} 未配置"
+        raise ValueError(f"任务角色预检失败（{problems}）；不能自动换模型，处理后用 foreman team check 确认")
     verify_receipt(root, dispatcher, executable)
+    workflow = Workflow(root)
     plan = workflow.begin(task_id)
     execution_id = plan["execution_id"]
     outcome = "failed"

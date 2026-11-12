@@ -49,7 +49,8 @@ def verify_receipt(root: Path, dispatcher: str, executable: str):
 def run_probe(root: Path, dispatcher: str, executable: str = "droid",
               settings_path: Path | None = None, timeout: int = 120) -> dict:
     if dispatcher not in {m["id"] for m in list_byok_models(settings_path)}:
-        raise ValueError("探针模型必须由用户选择完整 BYOK ID")
+        raise ValueError(f"探针模型 {dispatcher} 不在已配置的模型里：必须是用户选定的完整 BYOK ID，"
+                         "即 foreman models 的第一列")
     check_capabilities(executable)
     root = root.resolve()
     state = root / ".task-management"

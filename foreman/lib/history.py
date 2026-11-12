@@ -11,9 +11,9 @@ from pathlib import Path
 from uuid import uuid4
 
 try:
-    from .store import atomic_write
+    from .store import atomic_write, describe_error
 except ImportError:
-    from store import atomic_write
+    from store import atomic_write, describe_error
 
 
 @dataclass
@@ -33,6 +33,10 @@ class ExecutionRecord:
     details: dict = field(default_factory=dict)
 
 
+class RecordError(ValueError):
+    """执行记录文件存在，但内容不能用"""
+
+
 class ExecutionHistory:
     """执行历史管理器"""
 
@@ -40,6 +44,8 @@ class ExecutionHistory:
         self.project_root = project_root
         self.history_dir = project_root / ".task-management" / "history"
         self.history_dir.mkdir(parents=True, exist_ok=True)
+        # 最近一次列出记录时读不出来、被跳过的文件名
+        self.unreadable: list[str] = []
 
     def record_start(
         self,
@@ -110,18 +116,22 @@ class ExecutionHistory:
     def get_task_history(self, task_id: str) -> list[ExecutionRecord]:
         """获取任务的所有执行记录"""
         self._validate_id(task_id)
-        records = []
-        for file in self.history_dir.glob(f"{task_id}-*.json"):
-            record = self._load_record(file.stem)
-            if record:
-                records.append(record)
-        return sorted(records, key=lambda r: r.start_time, reverse=True)
+        return self._list(f"{task_id}-*.json")
 
     def get_all_history(self) -> list[ExecutionRecord]:
         """获取所有执行记录"""
+        return self._list("*.json")
+
+    def _list(self, pattern: str) -> list[ExecutionRecord]:
+        """一个坏文件不应让其余记录都看不到：跳过它，文件名记在 unreadable 里"""
         records = []
-        for file in self.history_dir.glob("*.json"):
-            record = self._load_record(file.stem)
+        self.unreadable = []
+        for file in sorted(self.history_dir.glob(pattern)):
+            try:
+                record = self._load_record(file.stem)
+            except ValueError:
+                self.unreadable.append(file.name)
+                continue
             if record:
                 records.append(record)
         return sorted(records, key=lambda r: r.start_time, reverse=True)
@@ -134,19 +144,22 @@ class ExecutionHistory:
         atomic_write(file_path, content)
 
     def _load_record(self, execution_id: str) -> ExecutionRecord | None:
-        """加载记录"""
+        """加载记录；没有文件时返回 None，文件读不出来时报错"""
         self._validate_id(execution_id)
         file_path = self.history_dir / f"{execution_id}.json"
         if not file_path.exists():
             return None
 
         try:
-            data = json.loads(file_path.read_text(encoding="utf-8"))
-            return ExecutionRecord(**data)
-        except (OSError, json.JSONDecodeError, TypeError):
-            return None
+            record = ExecutionRecord(**json.loads(file_path.read_text(encoding="utf-8")))
+            if not isinstance(record.start_time, str) or not isinstance(record.details, dict):
+                raise TypeError("start_time 应是字符串，details 应是 JSON 对象")
+        except (OSError, ValueError, TypeError) as error:
+            raise RecordError(f"执行记录 {file_path} 无法使用（{describe_error(error)}）。文件没有被改动；"
+                              "修好它，或从 git、备份恢复它") from error
+        return record
 
     @staticmethod
     def _validate_id(value: str) -> None:
-        if not re.fullmatch(r"[A-Za-z0-9_-]+", value):
-            raise ValueError("无效的任务或执行 ID")
+        if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", value):
+            raise ValueError(f"无效的任务或执行 ID: {value!r}（只能含字母、数字、下划线和连字符）")

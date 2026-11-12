@@ -377,6 +377,9 @@ foreman team check    # 检查 droid 文件和模型服务
 foreman init
 ```
 
+### 提示文件读不出来或无法使用
+任务板、配置和执行记录损坏时，命令报出文件和位置后停下，不改动文件；修好 JSON 或从 git、备份恢复。配置损坏时 `init` 不会覆盖它，因为里面可能有角色。checkpoint 损坏时运行 `foreman execution sync`，原文件会另存为 `checkpoint.json.corrupted`。
+
 ### 依赖循环
 `add` 不检查依赖。运行 `foreman validate` 列出依赖环、不存在的依赖和缺失的字段；batch 无可执行任务时检查 skipped，不把依赖阻塞当作全部完成。
 

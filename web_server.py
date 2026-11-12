@@ -79,17 +79,9 @@ def create_app(repo_root=None, registry_file=None):
         return doc
 
     def configuration(project):
-        path = project.path('.task-management/config.json')
-        # The library silently falls back on malformed JSON; the monitor must show failures.
-        if path.exists():
-            loaded = json.loads(path.read_text(encoding='utf-8'))
-            if not isinstance(loaded, dict):
-                raise ValueError('Invalid configuration')
+        # A malformed file makes ExecutionConfig raise, which the catch-all handler reports as a 500.
         config = ExecutionConfig(project.root)
-        roles = config.get_roles()
-        if not isinstance(roles, dict) or any(not isinstance(entry, dict) for entry in roles.values()):
-            raise ValueError('Invalid roles')
-        project.validate_roles(roles)
+        project.validate_roles(config.get_roles())
         return config
 
     def row_for(task, tasks):

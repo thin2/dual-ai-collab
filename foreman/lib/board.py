@@ -110,7 +110,7 @@ class TaskBoard:
         def mutate(document: dict) -> dict:
             task = find_task(document, task_id)
             if not task:
-                raise ValueError(f"Task {task_id} not found")
+                raise ValueError(f"任务 {task_id} 不存在")
             if require_unmanaged and task.get("execution_id"):
                 raise ManagedTaskError(
                     "受管任务请使用 execution finish/accept/retry/block/unblock 或 integrate 更新状态；"

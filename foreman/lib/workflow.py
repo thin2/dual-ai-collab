@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .board import TaskBoard
-from .checkpoint import CheckpointManager
+from .checkpoint import CheckpointError, CheckpointManager
 from .config import ExecutionConfig
 from .executor import TaskExecutor
 from .history import ExecutionHistory
@@ -217,6 +217,7 @@ class Workflow:
         self.board = TaskBoard.load(self.root)
         self.history = ExecutionHistory(self.root)
         self.lock = self.root / ".task-management" / "workflow"
+        self.checkpoint_set_aside: Path | None = None
 
     def current_record(self, task: dict):
         """The run the board currently points this task at; None before its first begin."""
@@ -235,8 +236,11 @@ class Workflow:
 
     def _record(self, execution_id):
         record = self.history._load_record(execution_id)
-        if not record or not record.details.get("managed"):
-            raise ValueError("找不到受管执行记录")
+        if not record:
+            raise ValueError(f"找不到受管执行记录 {execution_id}：{self.history.history_dir} 下没有这个文件，"
+                             "它可能被删除，或没有随项目一起拷贝；恢复这个文件后重试")
+        if not record.details.get("managed"):
+            raise ValueError(f"找不到受管执行记录：{execution_id} 不是 execution begin 或 run 登记的记录")
         return record
 
     def _latest(self, record):
@@ -277,9 +281,18 @@ class Workflow:
         return {"checked": True, "head_moved": before["head"] != after["head"],
                 "paths": sorted(p for p in moved if not _within(p, scopes) and not p.startswith(workspace))}
 
-    def sync(self):
+    def sync(self) -> None:
+        """Rewrite the checkpoint's progress from the board.
+
+        An unreadable checkpoint is moved aside, not overwritten; checkpoint_set_aside names where.
+        """
         checkpoint = CheckpointManager(self.root)
-        previous = checkpoint.load() or {}
+        try:
+            previous = checkpoint.load() or {}
+        except CheckpointError:
+            # Every execution command ends here; failing now would report an error
+            # for a step whose record and board update have already been saved.
+            self.checkpoint_set_aside, previous = checkpoint.set_aside(), {}
         data = previous.get("data", {})
         tasks = self.board.get_all_tasks()
         completed = sum(t.get("status") == "DONE" and bool(t.get("integration")) for t in tasks)
@@ -297,8 +310,16 @@ class Workflow:
             carried = []
             if task.get("execution_id"):
                 previous = self._record(task["execution_id"])
-                if previous.status == "running" or previous.details.get("recovery", {}).get("decision") != "retry":
-                    raise ValueError("上次执行需要检查并明确 retry，不能仅改为 PENDING 后重派")
+                if previous.status == "running":
+                    raise ValueError(
+                        f"任务 {task['id']} 已经登记开始，还没有登记结束：运行 foreman show {task['id']} "
+                        "查看该用哪条 finish 命令；想重做也要先 finish，再检查并明确 retry"
+                    )
+                if previous.details.get("recovery", {}).get("decision") != "retry":
+                    raise ValueError(
+                        f"任务 {task['id']} 的上次执行还没有了结，不能重新开始：运行 foreman show {task['id']} "
+                        "查看下一步（验收、集成，或检查后明确 retry 再重做）；不能仅改为 PENDING 后重派"
+                    )
                 carried = (previous.details.get("undeclared") or {}).get("paths", [])
             if not direct and not plan["model"]:
                 raise ValueError("受管派发需要用户选定模型的 role")
@@ -307,12 +328,18 @@ class Workflow:
             task_files(task)
             dependencies = runtime_dependencies(task)
             config = ExecutionConfig(self.root)
-            running = sum(t.get("status") == "IN_PROGRESS" for t in self.board.get_all_tasks())
-            if running >= config.get_max_parallel():
-                raise ValueError("已达到并发上限")
+            running = [str(t.get("id")) for t in self.board.get_all_tasks() if t.get("status") == "IN_PROGRESS"]
+            if len(running) >= config.get_max_parallel():
+                raise ValueError(
+                    f"已达到并发上限 {config.get_max_parallel()}：任务 {'、'.join(running)} 正在进行。"
+                    "等它们登记结束，或用 foreman config set parallel.max_parallel=<数字> 调高上限"
+                )
             selection = self.board.select_batch(config.get_roles(), config.get_max_parallel())
             if task["id"] not in {t["id"] for t in selection["batch"]}:
-                raise ValueError("任务尚不可开始：检查状态、依赖或文件冲突（batch 的 skipped 会列出原因）")
+                reason = next((item["reason"] for item in selection["skipped"] if item["id"] == task["id"]), None)
+                # Only tasks in a ready status are considered at all, so no reason means the status.
+                raise ValueError(f"任务尚不可开始：{reason}" if reason else
+                                 f"任务尚不可开始：状态是 {task.get('status', 'PENDING')}，只有待开始（PENDING）的任务可以开始")
             before = snapshot(self.root, plan["files"])
             # Reject unusable dependency paths now, not after the worker has finished.
             snapshot(self.root, dependencies)
@@ -383,7 +410,7 @@ class Workflow:
                 )
                 record = self._record(execution_id)
             elif record.details["dispatch_outcome"] != outcome:
-                raise ValueError("派发结果已登记")
+                raise ValueError(f"执行结果已登记为 {record.details['dispatch_outcome']}，不能改成 {outcome}")
             # Repeating finish repairs a board update lost after the record was saved.
             # Keep file ownership until independent inspection and acceptance.
             if first or task["status"] == "IN_PROGRESS":
@@ -446,6 +473,9 @@ class Workflow:
 
     def accept(self, execution_id: str, evidence: dict):
         """Store main-agent evidence independently of the worker result."""
+        if not isinstance(evidence, dict):
+            raise ValueError("验收证据格式错误：应是含 inspection 和 checks 的 JSON 对象；"
+                             "用 foreman acceptance <任务ID> --template 生成框架")
         with _file_lock(self.lock):
             record = self._record(execution_id)
             task = self._latest(record)
@@ -462,15 +492,19 @@ class Workflow:
                 raise ValueError("派发后验收条件已变更，需要新一轮执行记录")
             dependencies = runtime_dependencies(task)
             results = evidence.get("checks", [])
-            if not isinstance(results, list) or not all(isinstance(r, dict) for r in results):
-                raise ValueError("验收证据格式错误")
-            if len(results) != len(checks) or {r.get("id") for r in results} != {c["id"] for c in checks}:
-                raise ValueError("必须提供全部验收条件的结果，不能遗漏或重复")
+            if not isinstance(results, list) or not all(isinstance(r, dict) and isinstance(r.get("id"), str)
+                                                        for r in results):
+                raise ValueError("验收证据格式错误：checks 应是列表，每项是含 id、status、evidence 的 JSON 对象")
+            if len(results) != len(checks) or {r["id"] for r in results} != {c["id"] for c in checks}:
+                raise ValueError("必须提供全部验收条件的结果，不能遗漏或重复；应有的 id: "
+                                 + "、".join(c["id"] for c in checks))
             if not isinstance(evidence.get("inspection"), str) or not evidence["inspection"].strip():
-                raise ValueError("必须记录实际文件审查结论")
-            for result in results:
-                if result.get("status") != "passed" or not isinstance(result.get("evidence"), str) or not result["evidence"].strip():
-                    raise ValueError("验收未全部通过或缺少证据")
+                raise ValueError("必须记录实际文件审查结论：在 inspection 字段写明看过哪些文件、结论是什么")
+            unproven = [r["id"] for r in results if r.get("status") != "passed"
+                        or not isinstance(r.get("evidence"), str) or not r["evidence"].strip()]
+            if unproven:
+                raise ValueError(f"验收未全部通过或缺少证据: {'、'.join(unproven)}。"
+                                 "每项的 status 须为 passed，evidence 写明实际运行或观察到的结果")
             undeclared = record.details.get("undeclared") or {}
             explained = evidence.get("undeclared")
             if undeclared.get("paths") and not (isinstance(explained, str) and explained.strip()):
@@ -533,11 +567,12 @@ class Workflow:
     def integration_ready(self, task_id: str, commit: str | None = None, repo: Path | None = None):
         task = self.board.get_task(task_id)
         if not task:
-            raise ValueError("任务不存在")
+            raise ValueError(f"任务 {task_id} 不存在")
         if not task.get("execution_id"):
             return  # Legacy tasks retain their existing integration contract.
         if task["status"] != "AWAITING_INTEGRATION":
-            raise ValueError("任务尚未处于待集成状态")
+            raise ValueError(f"任务尚未处于待集成状态（现在是 {task['status']}）；"
+                             f"运行 foreman show {task['id']} 查看下一步")
         record = self._record(task["execution_id"])
         accepted = record.details["acceptance"]
         if accepted["status"] != "passed" or not model_verified(record):
@@ -583,14 +618,28 @@ class Workflow:
             return task
 
 
+def resolve_commit(repo: Path, commit: str) -> str:
+    """Full SHA of a commit in repo. When it cannot be resolved, the error says which of the usual causes it is."""
+    def git(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, check=False)
+
+    try:
+        resolved = git("rev-parse", "--verify", "--quiet", f"{commit}^{{commit}}")
+    except OSError as error:
+        raise ValueError(f"无法运行 git（{error}）；确认 git 已安装并在 PATH 中") from error
+    if resolved.returncode == 0:
+        return resolved.stdout.strip()
+    if git("rev-parse", "--git-dir").returncode:
+        raise ValueError(f"{repo} 不是 git 仓库，无法核对提交 {commit}")
+    if git("rev-parse", "--verify", "--quiet", "HEAD").returncode:
+        raise ValueError(f"{repo} 还没有任何提交；先提交任务的改动，再用那个提交运行这条命令")
+    raise ValueError(f"在 {repo} 中找不到提交 {commit}")
+
+
 def delivery_check(root: Path, commit: str, paths: list[str]) -> dict:
     """Check explicit runtime dependencies against a commit without changing the index."""
     root = root.resolve()
-    resolved = subprocess.run(["git", "-C", str(root), "rev-parse", "--verify", f"{commit}^{{commit}}"],
-                              capture_output=True, text=True, check=False)
-    if resolved.returncode:
-        raise ValueError("交付提交不存在")
-    sha = resolved.stdout.strip()
+    sha = resolve_commit(root, commit)
     if not paths:
         raise ValueError("交付检查需要显式声明所有运行依赖路径")
     current = snapshot(root, paths)

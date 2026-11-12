@@ -28,10 +28,16 @@ from lib import (  # noqa: E402
     remove_role,
     write_tasks_document,
 )
-from lib.plan import check_plan  # noqa: E402
-from lib.store import DEFAULT_TASKS_MD, READY_STATUSES, dependency_ids, dependency_satisfied  # noqa: E402
+from lib.plan import KNOWN_STATUSES, check_plan  # noqa: E402
+from lib.store import (  # noqa: E402
+    DEFAULT_TASKS_MD,
+    READY_STATUSES,
+    dependency_ids,
+    dependency_satisfied,
+    describe_error,
+)
 from lib.team import model_catalog  # noqa: E402
-from lib.workflow import Workflow, delivery_check, evidence_template, is_direct  # noqa: E402
+from lib.workflow import Workflow, delivery_check, evidence_template, is_direct, resolve_commit  # noqa: E402
 
 
 def _print_json(data) -> None:
@@ -77,6 +83,28 @@ def _input_file(root: Path, value: str) -> Path:
     if not path.is_absolute() and not path.exists() and (root / path).exists():
         return root / path
     return path
+
+
+def _read_input(root: Path, value: str, what: str) -> str:
+    """读取命令行给出的输入文件；读不了时说明是哪个文件、为什么"""
+    path = _input_file(root, value)
+    try:
+        return path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        searched = "" if path.is_absolute() else f"：当前目录和项目根目录 {root} 下都没有"
+        raise ValueError(f"找不到{what} {value}{searched}") from None
+    except (OSError, ValueError) as error:
+        raise ValueError(f"读不了{what} {path}（{describe_error(error)}）") from error
+
+
+def _read_json(root: Path, value: str, what: str):
+    """读取命令行给出的 JSON 文件；- 表示标准输入"""
+    raw = sys.stdin.read() if value == "-" else _read_input(root, value, what)
+    try:
+        return json.loads(raw)
+    except ValueError as error:
+        source = "标准输入" if value == "-" else value
+        raise ValueError(f"{what} {source} 不是合法的 JSON（{describe_error(error)}）") from error
 
 
 def cmd_init(args):
@@ -140,8 +168,7 @@ def _who(task: dict) -> str:
 
 def cmd_add(args):
     """把 JSON 文件里的任务写入任务板"""
-    raw = sys.stdin.read() if args.file == "-" else _input_file(args.root, args.file).read_text(encoding="utf-8")
-    data = json.loads(raw)
+    data = _read_json(args.root, args.file, "任务文件")
     tasks = data["tasks"] if isinstance(data, dict) and "tasks" in data else data
     if isinstance(tasks, dict):
         tasks = [tasks]
@@ -223,6 +250,9 @@ def _next_steps(workflow: Workflow, task: dict) -> list[str]:
         reason = next((item["reason"] for item in selection["skipped"] if item["id"] == tid), None)
         return [f"暂时不能开始：{reason}" if reason else f"暂时不能开始；运行 {CLI} batch 查看原因"]
     if not record:
+        if task.get("execution_id"):
+            return [f"任务板登记的执行记录 {task['execution_id']} 不存在："
+                    f"恢复 {workflow.history.history_dir.relative_to(workflow.root)}/{task['execution_id']}.json 后再继续"]
         if status == "BLOCKED":
             return ["等用户处理阻塞原因", f"{CLI} update {tid} PENDING --reset-retries   # 没有执行记录的旧任务"]
         return ["没有执行记录的旧任务：用 update 改状态，用 integrate 确认集成"]
@@ -315,6 +345,10 @@ def cmd_validate(args):
 
 def cmd_update_status(args):
     """更新任务状态"""
+    if args.status not in KNOWN_STATUSES:
+        upper = args.status.upper()
+        hint = f"状态要大写，是不是 {upper}？" if upper in KNOWN_STATUSES else ""
+        raise ValueError(f"状态 {args.status} 无效。{hint}可用的状态: {'、'.join(sorted(KNOWN_STATUSES))}")
     board = TaskBoard.load(args.root)
 
     try:
@@ -344,21 +378,11 @@ def cmd_fail(args):
 def cmd_integrate(args):
     """确认任务的提交已在目标仓库中，记录集成并标记 DONE"""
     repo = Path(args.target or args.root).resolve()
-    resolved = subprocess.run(
-        ["git", "-C", str(repo), "rev-parse", "--verify", "--quiet", f"{args.commit}^{{commit}}"],
-        capture_output=True,
-        text=True,
-    )
-    if resolved.returncode != 0:
-        print(f"错误: 在 {repo} 中找不到提交 {args.commit}", file=sys.stderr)
-        sys.exit(1)
-    commit = resolved.stdout.strip()
-    try:
-        Workflow(args.root).integrate(args.task_id, commit, repo, args.note or "")
-    except ValueError as e:
-        print(f"错误: {e}", file=sys.stderr)
-        sys.exit(1)
+    commit = resolve_commit(repo, args.commit)
+    workflow = Workflow(args.root)
+    workflow.integrate(args.task_id, commit, repo, args.note or "")
     print(f"任务 {args.task_id} 已集成（{commit[:12]}）→ DONE")
+    _warn_set_aside(workflow)
 
 
 def cmd_checkpoint(args):
@@ -369,11 +393,12 @@ def cmd_checkpoint(args):
         print(checkpoint.check())
     elif args.action == "save":
         if not args.phase:
-            print("错误: save 需要 --phase", file=sys.stderr)
-            sys.exit(1)
+            raise ValueError(f"save 需要 --phase，例如 {CLI} checkpoint save --phase developing")
         data = {}
         for item in args.data or []:
-            key, value = item.split("=", 1)
+            key, separator, value = item.partition("=")
+            if not separator or not key:
+                raise ValueError(f"--data 的每一项要写成 key=value，收到的是 {item!r}")
             data[key] = value
         checkpoint.save(args.phase, **data)
         print(f"Checkpoint 已保存: phase={args.phase}")
@@ -390,20 +415,29 @@ def cmd_config(args):
         _print_json(config.get_all_settings())
     elif args.action == "set":
         if not args.key_value or "=" not in args.key_value:
-            print("错误: set 需要 key=value", file=sys.stderr)
-            sys.exit(1)
-        key, value = args.key_value.split("=", 1)
-        if key.startswith("execution."):
-            complexity = key.split(".", 1)[1]
-            config.set_droid_for_complexity(complexity, value)
-            print(f"已设置 {complexity} → {value}")
-        elif key in ("parallel.max_parallel", "parallel.max_retries"):
-            config.config["parallel"][key.split(".", 1)[1]] = int(value)
+            raise ValueError(f"set 需要 key=value，例如 {CLI} config set parallel.max_parallel=3")
+        key, value = (part.strip() for part in args.key_value.split("=", 1))
+        section, _, name = key.partition(".")
+        if section == "execution" and name in config.DEFAULT_CONFIG["execution"]:
+            if not value:
+                raise ValueError(f"{key} 需要一个 droid 名，例如 {CLI} config set {key}=worker")
+            config.set_droid_for_complexity(name, value)
+            print(f"已设置 {name} → {value}")
+        elif section == "parallel" and name in config.MINIMUMS:
+            try:
+                number = int(value)
+            except ValueError:
+                raise ValueError(f"{key} 要是整数，收到的是 {value!r}") from None
+            if number < config.MINIMUMS[name]:
+                raise ValueError(f"{key} 不能小于 {config.MINIMUMS[name]}")
+            config.config["parallel"][name] = number
             config.save()
-            print(f"已设置 {key} = {int(value)}")
+            print(f"已设置 {key} = {number}")
         else:
-            print(f"不支持的配置键: {key}", file=sys.stderr)
-            sys.exit(1)
+            settable = [f"execution.{name}" for name in config.DEFAULT_CONFIG["execution"]]
+            settable += [f"parallel.{name}" for name in config.MINIMUMS]
+            raise ValueError(f"不支持的配置键: {key}。可以设置的有: {'、'.join(settable)}；"
+                             f"角色用 {CLI} team set 配置")
 
 
 def cmd_models(args):
@@ -438,7 +472,7 @@ def cmd_team(args):
     elif args.action == "set":
         instructions = None
         if args.instructions_file:
-            instructions = Path(args.instructions_file).read_text(encoding="utf-8")
+            instructions = _read_input(root, args.instructions_file, "系统提示文件")
         path = configure_role(
             root,
             args.role,
@@ -461,6 +495,8 @@ def cmd_team(args):
         results = check_team(root, settings_path=settings)
         if args.json:
             _print_json(results)
+        elif not results:
+            print("还没有配置角色，没有需要检查的；没有 role 的任务由当前会话直接执行")
         for item in results:
             if not args.json:
                 state = "正常" if item["ok"] else "不可用"
@@ -491,6 +527,7 @@ def cmd_history(args):
     else:
         records = history.get_all_history()
 
+    _warn_unreadable(history)
     if not records:
         print("没有执行记录")
         return
@@ -504,6 +541,12 @@ def cmd_history(args):
         print(f"{status_symbol} {record.task_id} - {record.start_time} - {duration} - {record.droid}{model}")
 
 
+def _warn_unreadable(history: ExecutionHistory) -> None:
+    if history.unreadable:
+        print(f"注意: {len(history.unreadable)} 个执行记录读不出来，已跳过（在 {history.history_dir} 下）: "
+              + "、".join(history.unreadable), file=sys.stderr)
+
+
 def _evidence_path(board: TaskBoard, task: dict) -> Path:
     # 任务板所在目录的改动不算范围外改动，证据放这里不会被 accept 拒绝
     return board.task_file.parent / f"acceptance-{task['id']}.json"
@@ -513,9 +556,9 @@ def cmd_acceptance(args):
     """提取验收命令，或生成验收证据框架"""
     board = TaskBoard.load(args.root)
     task = board.get_task(args.task_id)
+    if not task:
+        raise ValueError(f"任务 {args.task_id} 不存在")
     if args.template:
-        if not task:
-            raise ValueError(f"任务 {args.task_id} 不存在")
         if not re.fullmatch(r"[A-Za-z0-9_-]+", str(task["id"])):
             raise ValueError(f"任务编号 {task['id']!r} 不能用作文件名：只能含字母、数字、下划线和连字符")
         record = Workflow(args.root).current_record(task)
@@ -533,14 +576,14 @@ def cmd_acceptance(args):
             print(f"执行期间声明范围外有改动：{'、'.join(undeclared)}；在 undeclared 字段写明来源和处理结论")
         print(f"填好后运行: {CLI} execution accept {task['id']} --evidence-file {path.relative_to(board.project_root)}")
         return
-    if task and task.get("acceptance"):
+    if task.get("acceptance"):
         from lib.workflow import requirements
         _print_json(requirements(task))
         return
     commands = board.get_acceptance_commands(args.task_id)
 
     if not commands:
-        print("没有找到验收命令")
+        print(f"任务 {task['id']} 没有验收条件：没有 acceptance 字段，“验收”章节里也没有反引号包住的命令")
         return
 
     for i, cmd in enumerate(commands, 1):
@@ -579,8 +622,7 @@ def cmd_execution(args):
         if result["status"] not in {"passed", "not_applicable"}:
             sys.exit(2)
     elif args.action == "accept":
-        evidence = _input_file(args.root, args.evidence_file).read_text(encoding="utf-8")
-        workflow.accept(args.id, json.loads(evidence))
+        workflow.accept(args.id, _read_json(args.root, args.evidence_file, "验收证据文件"))
         print("验收已记录；执行结果保持不变")
     elif args.action in {"retry", "block"}:
         workflow.retry(args.id, args.reason, args.action == "block")
@@ -594,6 +636,7 @@ def cmd_execution(args):
         records = [dict(asdict(record), current=record.execution_id in current)
                    for record in workflow.history.get_all_history()
                    if record.details.get("managed") and not record.details.get("integration")]
+        _warn_unreadable(workflow.history)
         _print_json({"records": records, "instruction":
                     "先确认子进程已结束；running 不代表仍存活。未知结束时间用 finish --outcome interrupted。"
                     "再 inspect，审查文件后 accept、retry 或 block。不要自动重跑。"
@@ -602,7 +645,16 @@ def cmd_execution(args):
                     "current 为 false 的记录已被后续派发替代或未登记到任务板，仅供查阅。"})
     elif args.action == "sync":
         workflow.sync()
-        print("Checkpoint 已从实际任务板同步，保留其他上下文")
+        if not workflow.checkpoint_set_aside:
+            print("Checkpoint 已从实际任务板同步，保留其他上下文")
+    _warn_set_aside(workflow)
+
+
+def _warn_set_aside(workflow: Workflow) -> None:
+    if workflow.checkpoint_set_aside:
+        print(f"注意: 原来的 checkpoint 读不出来，已另存为 {workflow.checkpoint_set_aside}；"
+              "任务进度已按任务板重建，规格路径等其他上下文要从那个文件里找回，再用 checkpoint save 补上",
+              file=sys.stderr)
 
 
 def cmd_delivery(args):
@@ -779,7 +831,11 @@ def main():
         }[args.command]
 
         cmd_func(args)
-    except (TaskStoreError, TeamError, ValueError, OSError, subprocess.TimeoutExpired) as e:
+    except OSError as e:
+        target = f"{e.filename}: " if e.filename else ""
+        print(f"错误: {target}{describe_error(e)}", file=sys.stderr)
+        sys.exit(1)
+    except (TaskStoreError, TeamError, ValueError, subprocess.TimeoutExpired) as e:
         print(f"错误: {e}", file=sys.stderr)
         sys.exit(1)
     except KeyboardInterrupt:

@@ -494,7 +494,7 @@ foreman init
 写的既不是已有的 `execution_id`，也不是任务板上的任务。任务存在但还没 `begin` 过时，提示会改成先运行 `execution begin`。
 
 ### execution begin 或 run 提示“任务尚不可开始”
-任务不在当前可开始的一批里。运行 `batch` 看 `skipped` 里的原因：依赖还没集成、文件和进行中的任务重叠，或已达到并发上限。
+任务不在当前可开始的一批里，提示后面会写原因：依赖还没集成、文件和进行中的任务重叠、角色没配置，或状态不是 PENDING。达到并发上限时会列出正在进行的任务。`batch` 的 `skipped` 能一次看到所有任务的原因。
 
 ### run 提示任务没有 role
 没有 `role` 的任务由当前会话直接执行（2.2）。要派发就用 `add --replace` 给任务补上 `role`。
@@ -518,6 +518,9 @@ foreman validate
 ```bash
 foreman init    # 补写默认配置，不动已有任务板
 ```
+
+### 提示某个文件“读不出来”或“无法使用”
+任务板、`.task-management/config.json` 和执行记录损坏时，命令报出文件和出错位置后停下，不改动文件：修好 JSON，或从 git、备份恢复。配置文件里可能有角色，`init` 和 `config set` 不会用默认配置盖掉它；确认不需要其中的内容时才删除它再 `init`。checkpoint 损坏时运行 `foreman execution sync`：原文件另存为 `checkpoint.json.corrupted`，进度按任务板重建，规格路径等上下文从那个文件里找回后用 `checkpoint save` 补上。
 
 ### Droid 不存在
 Task 报 `Droid configuration not found` 时：

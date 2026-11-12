@@ -96,7 +96,9 @@ GET  /api/specs/<文件名>                    规划文档内容（超过 1 MiB
 服务不把错误细节发给页面，也不写进终端日志，避免泄露文件内容。通常是项目里某个数据文件不是合法的 JSON：
 
 - 任务板：在项目目录运行 `foreman show`，损坏时会报出文件和位置。
-- 配置、checkpoint 和执行记录：用 `python3 -m json.tool <文件>` 逐个检查 `.task-management/config.json`、`.task-management/checkpoint.json` 和 `.task-management/history/*.json`。CLI 读到损坏的配置或 checkpoint 时会按“没有”处理，不报错。
+- 配置：运行 `foreman config show`，损坏时会报出文件和位置。
+- checkpoint：运行 `foreman checkpoint check`；损坏时 `foreman execution sync` 会把原文件另存为 `checkpoint.json.corrupted`，再按任务板重建进度。
+- 执行记录：`foreman history` 会在标准错误输出里列出读不出来的 `.task-management/history/*.json`。
 
 ### 项目未登记（404）或项目目录不存在（409）
 404 表示地址里的项目 ID 不在注册表里，回到首页重新选择。409 表示登记的目录不存在或已变成符号链接；恢复目录，或者用新路径重新登记。

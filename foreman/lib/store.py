@@ -32,9 +32,24 @@ def atomic_write(path: Path, content: str) -> None:
     temp.replace(path)
 
 
-def _normalize_task_num(task_num: str) -> str:
-    """标准化任务编号：001 和 1 视为相同"""
-    return task_num.lstrip("0") or "0"
+def describe_error(error: Exception) -> str:
+    """读文件或解析 JSON 出错的原因，写成给人看的样子"""
+    if isinstance(error, json.JSONDecodeError):
+        return f"第 {error.lineno} 行第 {error.colno} 列：{error.msg}"
+    if isinstance(error, UnicodeDecodeError):
+        return "不是 UTF-8 编码的文本"
+    for kind, reason in ((FileNotFoundError, "文件不存在"), (PermissionError, "没有读写权限"),
+                         (IsADirectoryError, "它是目录，不是文件")):
+        if isinstance(error, kind):
+            return reason
+    if isinstance(error, OSError) and error.strerror:
+        return error.strerror
+    return str(error)
+
+
+def _normalize_task_num(task_num) -> str:
+    """标准化任务编号：001 和 1 视为相同。手工改过的任务板里编号可能是数字"""
+    return str(task_num).lstrip("0") or "0"
 
 
 def _extract_commands_from_text(text: str) -> list[str]:
@@ -137,12 +152,19 @@ def read_tasks_document(task_file: str | Path = DEFAULT_TASKS_MD, *, migrate: bo
 
     try:
         document = json.loads(source.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as e:
-        raise TaskStoreError(f"Failed to read tasks from {source}: {e}") from e
+    except (OSError, ValueError) as e:
+        raise TaskStoreError(f"任务板 {source} 读不出来（{describe_error(e)}）。"
+                             "文件没有被改动；修好 JSON，或从 git、备份恢复它") from e
+    tasks = document.get("tasks", []) if isinstance(document, dict) else None
+    if not isinstance(tasks, list) or any(not isinstance(task, dict) for task in tasks):
+        raise TaskStoreError(
+            f'任务板 {source} 的结构不对：应是 {{"tasks": [...]}}，其中每个任务是一个 JSON 对象。'
+            "文件没有被改动；修好它，或从 git、备份恢复它"
+        )
 
     # 标准化任务
     if migrate:
-        for task in document.get("tasks", []):
+        for task in tasks:
             _normalize_task(task)
 
     return document
