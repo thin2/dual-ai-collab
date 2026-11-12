@@ -8,7 +8,7 @@
 
 ## 当前会话直接执行
 
-没写 `role` 的任务不派发：`execution begin <task-id>` 登记开始并记录文件基线，当前会话自己实现，做完后 `execution finish <execution-id> --outcome completed`。记录的 `details.mode` 是 `direct`，droid 一栏是 `current-session`，没有模型。
+没写 `role` 的任务不派发：`execution begin <task-id>` 登记开始并记录文件基线，当前会话自己实现，做完后 `execution finish <task-id> --outcome completed`。记录的 `details.mode` 是 `direct`，droid 一栏是 `current-session`，没有模型。
 
 和派发相比：
 
@@ -64,6 +64,10 @@
 ```
 
 `execution inspect` 报出声明范围外的改动（`undeclared.paths` 不为空）时，证据里还要加一个 `undeclared` 字段，写明这些改动的来源和处理结论，例如 `"undeclared": "notes.md 是子 Agent 的草稿，已删除"`。没有这类改动时不需要这个字段。派发期间只是把已有改动提交进去（HEAD 变化但文件内容没变）不算范围外改动。
+
+`acceptance <task-id> --template` 在任务板目录生成 `acceptance-<task-id>.json`：`checks` 照抄每个验收条件（多出的 scenario、expected 等字段只供参考），`status`、`evidence`、`inspection` 留空，有范围外改动时多一个空的 `undeclared`。原样提交会被拒绝。
+
+`execution` 的 `finish`、`inspect`、`audit`、`accept`、`retry`、`block`、`unblock` 接受任务 ID，指这个任务在任务板上登记的当前执行记录；要操作已被替代的旧记录仍用完整的 execution-id（旧记录只能查看，修改会被拒绝）。
 
 `execution accept <execution-id> --evidence-file <path>` 不替主 Agent 做观察，也不能防止虚报证据。它强制字段完整、条件全覆盖、当前执行模型核对通过，并保留验收时 files 与 runtime_dependencies 的内容摘要和依赖声明。集成前 files、运行依赖（内容或声明）或验收条件有变化都会使验收失效，报错会列出变化的路径。不要根据子 Agent 的“完成”报告生成 passed。
 

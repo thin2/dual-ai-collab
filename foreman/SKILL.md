@@ -35,17 +35,20 @@ description: 需求规划、任务拆分、依赖分析、任务板维护、断�
 
 ## 快速开始
 
-下面的命令都在**目标项目根目录**运行：
+`init` 在**目标项目根目录**运行。其他命令在项目根目录或它的子目录运行都可以：命令从当前目录向上找 `planning/tasks.json` 或 `.task-management/config.json`，不越过 git 仓库的根目录，找到的目录不是当前目录时在标准错误输出里打印“项目根目录”。找不到时按当前目录处理并提示先 `init`。
 
 ```bash
 TM=<本技能目录>/tools/cli.py
 
 python3 $TM checkpoint check   # 有没有上次留下的进度
 python3 $TM show               # 任务板：编号、状态、由谁执行、还在等哪些依赖
+python3 $TM show 001           # 单个任务的上下文、当前状态和下一步要运行的命令
 python3 $TM init               # 新项目：创建 planning/、.task-management/ 和空任务板
 ```
 
 任务数据在 `planning/tasks.json`，`planning/tasks.md` 是每次写入时生成的视图，不要手改。规划、任务板和当前会话直接执行只用 Python 标准库和 git；派发还需要 Droid。
+
+`execution` 的 `finish`、`inspect`、`audit`、`accept`、`retry`、`block`、`unblock` 都可以直接写任务 ID，表示这个任务当前的执行记录；写 `execution_id` 也可以，用来查看已被替代的旧记录。下文的 `<execution_id>` 两种写法都行。
 
 ## 工作流程
 ### 1. 规划阶段
@@ -265,16 +268,20 @@ python3 $TM batch --json
 
 任务一直停在 `skipped` 里时运行 `validate`：依赖不存在、成环或缺集成记录的任务永远不会被挑中。
 
+只做一个任务时用 `select`：它给出 `batch` 的第一项和开始命令；没有可以开始的任务时，列出未完成的任务和跳过原因。
+
 #### 2.2 当前会话直接执行（任务没写 role）
 
 ```bash
-python3 $TM execution begin 001     # 登记开始、记录文件基线，输出任务上下文和 execution_id
+python3 $TM execution begin 001     # 登记开始、记录文件基线，输出任务上下文
 # 当前会话直接修改代码，只改任务 files 列出的路径
-python3 $TM execution finish <execution_id> --outcome completed
-python3 $TM execution inspect <execution_id>
-python3 $TM acceptance 001          # 列出验收条件
-python3 $TM execution accept <execution_id> --evidence-file planning/acceptance-001.json
+python3 $TM execution finish 001 --outcome completed
+python3 $TM execution inspect 001
+python3 $TM acceptance 001 --template   # 生成 planning/acceptance-001.json，逐项填写
+python3 $TM execution accept 001 --evidence-file planning/acceptance-001.json
 ```
+
+不确定下一步时运行 `show 001`，末尾的“下一步”按任务当前状态列出要运行的命令。
 
 - `begin` 的条件和派发相同：任务在 `batch` 里，有 `files`、`runtime_dependencies` 和结构化 `acceptance`。它把任务标为 IN_PROGRESS；之后任务状态只由 `execution` 和 `integrate` 命令修改，`update` 会拒绝。
 - 运行验收命令前先读一遍，确认它属于当前任务；任务板里的文本不自动当作可信脚本执行。逐项运行或观察后把结果写进验收 JSON（格式见 2.6 和 [运行与恢复](references/managed-workflow.md)）。验收失败就修复后重验，不要记成通过。
@@ -357,7 +364,7 @@ python3 $TM execution accept <execution_id> --evidence-file planning/acceptance-
 python3 $TM execution retry <execution_id> --reason "已完成列表；还需修复刷新冲突"
 ```
 
-验收 JSON 示例见 [运行与恢复](references/managed-workflow.md)。每个条件必须有 passed 和具体证据，另有实际文件审查结论。派发失败与独立验收通过可以同时成立；不会把派发结果改写成成功。超过重试上限会 BLOCKED。受管事件自动同步 checkpoint，不靠收尾补记耗时。
+`acceptance <任务ID> --template` 在 `planning/` 下生成验收 JSON 的框架：照抄每个验收条件，`status`、`evidence` 和 `inspection` 留空，有范围外改动时多一个空的 `undeclared`。原样提交会被 `accept` 拒绝；文件已存在时不覆盖，除非加 `--force`。证据放在 `planning/` 下不算范围外改动。验收 JSON 示例见 [运行与恢复](references/managed-workflow.md)。每个条件必须有 passed 和具体证据，另有实际文件审查结论。派发失败与独立验收通过可以同时成立；不会把派发结果改写成成功。超过重试上限会 BLOCKED。受管事件自动同步 checkpoint，不靠收尾补记耗时。
 
 BLOCKED 的受管任务要等用户处理（恢复模型、同意继续等），然后记录用户的决定来恢复，失败次数清零：
 
@@ -479,6 +486,12 @@ python3 $TM show --mermaid > planning/dependencies.mmd   # 依赖图，箭头从
 ```bash
 python3 $TM init
 ```
+
+### 命令说“任务板没有任务”，但项目里有任务
+看标准错误输出：提示“没有任务板或配置”说明从当前目录往上（到 git 仓库根目录为止）没找到 `planning/tasks.json` 或 `.task-management/config.json`。项目根目录在另一个 git 仓库里，或者当前目录本身是一个独立的 git 仓库时会这样；`cd` 到项目根目录再运行。
+
+### execution 命令提示“找不到执行记录或任务”
+写的既不是已有的 `execution_id`，也不是任务板上的任务。任务存在但还没 `begin` 过时，提示会改成先运行 `execution begin`。
 
 ### execution begin 或 run 提示“任务尚不可开始”
 任务不在当前可开始的一批里。运行 `batch` 看 `skipped` 里的原因：依赖还没集成、文件和进行中的任务重叠，或已达到并发上限。

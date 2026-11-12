@@ -162,6 +162,21 @@ def requirements(task: dict) -> list[dict]:
     return checks
 
 
+def evidence_template(task: dict, undeclared: list[str] | None = None) -> dict:
+    """Skeleton for execution accept. Verdicts and evidence are blank, so it is refused until filled in."""
+    checks = []
+    for check in requirements(task):
+        item = {"id": check["id"], "status": "", "evidence": "", "scenario": check["scenario"],
+                "expected": check["expected"], "method": check["method"]}
+        if check.get("command"):
+            item["command"] = check["command"]
+        checks.append(item)
+    template = {"inspection": "", "checks": checks}
+    if undeclared:
+        template["undeclared"] = ""
+    return template
+
+
 def _path_list(task: dict, field: str, purpose: str) -> list[str]:
     paths = task.get(field)
     if not isinstance(paths, list) or not paths or any(not isinstance(p, str) or not p.strip() for p in paths):
@@ -202,6 +217,21 @@ class Workflow:
         self.board = TaskBoard.load(self.root)
         self.history = ExecutionHistory(self.root)
         self.lock = self.root / ".task-management" / "workflow"
+
+    def current_record(self, task: dict):
+        """The run the board currently points this task at; None before its first begin."""
+        return self.history._load_record(task["execution_id"]) if task.get("execution_id") else None
+
+    def resolve_execution_id(self, value: str) -> str:
+        """Accept a task ID wherever an execution ID is expected: it stands for the task's current run."""
+        if self.history._load_record(value):
+            return value
+        task = self.board.get_task(value)
+        if not task:
+            raise ValueError(f"找不到执行记录或任务 {value}")
+        if not task.get("execution_id"):
+            raise ValueError(f"任务 {task['id']} 还没有执行记录；先运行 execution begin {task['id']}")
+        return task["execution_id"]
 
     def _record(self, execution_id):
         record = self.history._load_record(execution_id)

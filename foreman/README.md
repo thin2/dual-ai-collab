@@ -43,6 +43,8 @@ python3 $TM validate                      # 检查字段、依赖和角色
 python3 $TM show                          # 任务板：编号、状态、由谁执行、等待的依赖
 ```
 
+`init` 之外的命令也可以在项目的子目录里运行：它们会向上找到有任务板或配置的目录（不越过 git 仓库根目录）。
+
 ## 核心工作流
 
 ### 1. 规划阶段
@@ -62,10 +64,12 @@ python3 $TM show                          # 任务板：编号、状态、由谁
 **当前会话直接执行（任务没写 `role`）**：
 
 ```bash
-python3 $TM execution begin 001     # 登记开始、记录文件基线，输出任务上下文和 execution_id
+python3 $TM execution begin 001     # 登记开始、记录文件基线，输出任务上下文
 # 当前会话直接修改代码，只改任务 files 列出的路径
-python3 $TM execution finish <execution_id> --outcome completed
+python3 $TM execution finish 001 --outcome completed
 ```
+
+`execution` 的子命令可以直接写任务 ID，表示该任务当前的执行记录；`show 001` 末尾会按任务状态列出下一步命令。
 
 不需要组队、`preflight` 和调度模型。之后的验收和集成与派发的任务相同（见第 3、4 步），只是不做模型核对，验收记录会标明是自审。没做完时用 `finish --outcome failed` 加 `execution retry` 记下续做范围。
 
@@ -86,12 +90,12 @@ python3 $TM run 001 --dispatcher "custom:<调度模型ID>"
 ### 3. 验收和审查
 
 ```bash
-python3 $TM execution inspect <execution_id>
-python3 $TM acceptance 001
-# 主 Agent 检查实际文件、运行验收并记录观察证据后
-python3 $TM execution accept <execution_id> --evidence-file planning/acceptance-001.json
+python3 $TM execution inspect 001
+python3 $TM acceptance 001 --template   # 生成 planning/acceptance-001.json，结论和证据待填写
+# 主 Agent 检查实际文件、运行验收并把观察证据填进文件后
+python3 $TM execution accept 001 --evidence-file planning/acceptance-001.json
 # 不完整时保留文件，记录续做范围再派发
-python3 $TM execution retry <execution_id> --reason "文件检查结论与还需完成的事项"
+python3 $TM execution retry 001 --reason "文件检查结论与还需完成的事项"
 ```
 
 `inspect` 的 `notices` 会指出声明的文件完全没有变化，或派发期间有声明范围外的改动；后者必须在验收证据的 `undeclared` 字段说明。权限拒绝不代表没有写入文件，派发返回也不代表验收通过。`accept` 逐项检查证据和本次模型审计，保存独立时间戳；不会把失败派发改写成成功。证据格式、恢复和隔离边界见 [运行与恢复](references/managed-workflow.md)。
@@ -199,10 +203,10 @@ python tools/cli.py init
 # 写入和查看任务
 python tools/cli.py add --file planning/plan.json [--replace]
 python tools/cli.py show                 # 任务板
-python tools/cli.py show 001             # 单个任务的完整上下文
+python tools/cli.py show 001             # 单个任务的完整上下文、当前状态和下一步命令
 python tools/cli.py show --mermaid       # 依赖图
 
-# 选择下一个任务
+# 下一个可以开始的任务（batch 的第一项）
 python tools/cli.py select
 
 # 任务统计
@@ -219,7 +223,7 @@ python tools/cli.py update 001 IN_PROGRESS
 
 # 当前会话直接执行（任务没写 role）
 python tools/cli.py execution begin 001
-python tools/cli.py execution finish <execution_id> --outcome completed
+python tools/cli.py execution finish 001 --outcome completed   # 任务 ID 或 execution_id 都可以
 
 # Checkpoint 管理
 python tools/cli.py checkpoint check
@@ -229,8 +233,9 @@ python tools/cli.py checkpoint save --phase developing --data current_task=001
 python tools/cli.py history
 python tools/cli.py history --task-id 001
 
-# 提取验收命令
+# 列出验收条件；--template 生成验收证据框架 planning/acceptance-001.json
 python tools/cli.py acceptance 001
+python tools/cli.py acceptance 001 --template
 
 # 固定模型团队和并行派发
 python tools/cli.py models
@@ -352,6 +357,9 @@ Web UI 支持多项目管理和状态查看。
 ```bash
 python tools/cli.py init
 ```
+
+### 在子目录里运行时找不到任务板
+命令从当前目录向上找 `planning/tasks.json` 或 `.task-management/config.json`，到 git 仓库根目录为止。没找到时标准错误输出会提示，按当前目录处理。当前目录在另一个 git 仓库里（例如子模块）时，`cd` 到项目根目录再运行。
 
 ### 角色的 droid 不存在
 角色的 droid 在项目的 `.factory/droids/tm-<角色>.md`，由 `team set` 生成：

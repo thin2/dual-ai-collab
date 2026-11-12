@@ -71,6 +71,11 @@ class TestTaskBoard(unittest.TestCase):
         task = board.get_next_task()
         self.assertEqual(task["id"], "001")  # 001 无依赖，应该是下一个
 
+    def test_get_next_task_skips_started_tasks(self):
+        board = TaskBoard.load(self.project_root)
+        board.update_task_status("001", "IN_PROGRESS")
+        self.assertIsNone(board.get_next_task())  # 001 已开始，002 还在等它集成
+
     def test_update_status(self):
         board = TaskBoard.load(self.project_root)
         board.update_task_status("001", "IN_PROGRESS")

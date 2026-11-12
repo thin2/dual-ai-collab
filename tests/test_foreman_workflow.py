@@ -750,8 +750,8 @@ def test_mixed_priority_spellings_sort_instead_of_crashing(project):
     board = TaskBoard.load(project)
     # Numbers first (larger wins, missing counts as 1), then P1 before P2, then anything unreadable.
     assert [task["id"] for task in board.get_open_tasks()] == ["003", "002", "007", "004", "001", "005", "006"]
-    assert board.get_next_task()["id"] == "003"
     roles = {"frontend": {"model": "custom:proxy/claude"}}
+    assert board.get_next_task(roles)["id"] == "003"
     assert [task["id"] for task in board.select_batch(roles, max_parallel=4)["batch"]] == ["003", "002", "007", "004"]
 
 
@@ -1177,3 +1177,121 @@ def test_add_and_show_commands(tmp_path):
     checked = cli("validate")
     assert checked.returncode == 1 and "其中 1 个没有 role，由当前会话直接执行：001" in checked.stdout
     assert "frontend（任务 002、003）" in checked.stdout
+
+
+def test_select_only_offers_a_task_that_can_start(project):
+    tasks = [plan_task("001"), plan_task("002"), plan_task("003", dependencies=["001"])]
+    for task in tasks:
+        del task["role"]
+    save_plan(project, *tasks)
+
+    def cli(*args):
+        return subprocess.run([sys.executable, str(SKILL / "tools/cli.py"), *args],
+                              cwd=project, capture_output=True, text=True)
+
+    assert cli("select").stdout.startswith("下一个任务: 001 ")
+    assert cli("execution", "begin", "001").returncode == 0
+    # A started task is no longer on offer: select names what batch would start.
+    assert cli("select").stdout.startswith("下一个任务: 002 ")
+    assert cli("execution", "begin", "002").returncode == 0
+    assert cli("select").stdout.splitlines() == [
+        "没有可以开始的任务", "未完成: 001 IN_PROGRESS - 页面", "未完成: 002 IN_PROGRESS - 页面",
+        "跳过: 003 - 依赖未完成: #001"]
+    save_plan(project, {"id": "001", "title": "旧任务", "status": "DONE"})
+    assert cli("select").stdout == "所有任务都已完成\n"
+    save_plan(project)
+    assert cli("select").stdout == "任务板没有任务\n"
+
+
+def test_cli_finds_the_project_root_from_a_subdirectory(project):
+    nested = project / "src" / "deep"
+    nested.mkdir(parents=True)
+
+    def cli(*args, cwd=nested):
+        return subprocess.run([sys.executable, str(SKILL / "tools/cli.py"), *args],
+                              cwd=cwd, capture_output=True, text=True)
+
+    shown = cli("show")
+    assert shown.stdout.startswith("001\tPENDING") and f"项目根目录: {project.resolve()}" in shown.stderr
+    assert cli("acceptance", "001").returncode == 0
+    assert not (nested / "planning").exists() and not (nested / ".task-management").exists()
+    # A repository inside the project is a boundary: it is a project of its own.
+    inner = project / "vendor" / "lib"
+    inner.mkdir(parents=True)
+    git(inner, "init", "-q")
+    lost = cli("show", cwd=inner)
+    assert lost.stdout == "任务板没有任务\n" and "没有任务板或配置" in lost.stderr and "init" in lost.stderr
+    created = cli("init")
+    assert created.returncode == 0 and f"上级目录 {project.resolve()} 已有任务板" in created.stderr
+    assert cli("show").stdout == "任务板没有任务\n"
+
+
+def test_next_steps_lead_a_direct_task_through_the_cli_by_task_id(project):
+    git_project(project)
+    direct_project(project)
+    nested = project / "src"
+    nested.mkdir()
+
+    def cli(*args):
+        return subprocess.run([sys.executable, str(SKILL / "tools/cli.py"), *args],
+                              cwd=nested, capture_output=True, text=True)
+
+    def steps():
+        return cli("show", "001").stdout.split("## 下一步", 1)[1].splitlines()[1:]
+
+    assert steps() == ["execution begin 001   # 登记开始，然后由当前会话实现"]
+    assert cli("execution", "begin", "001").returncode == 0
+    assert steps()[1].startswith("execution finish 001 --outcome completed")
+    (project / "page-001.txt").write_text("中文\n")
+    (project / "stray.txt").write_text("顺手改的")
+    finished = cli("execution", "finish", "001", "--outcome", "completed")
+    assert finished.returncode == 0, finished.stderr
+    assert "acceptance 001 --template   # 生成 planning/acceptance-001.json，逐项填写证据" in steps()
+    assert json.loads(cli("execution", "inspect", "1").stdout)["undeclared"]["paths"] == ["stray.txt"]
+    made = cli("acceptance", "001", "--template")
+    assert made.returncode == 0 and "stray.txt" in made.stdout
+    proof = project / "planning" / "acceptance-001.json"
+    assert json.loads(proof.read_text(encoding="utf-8")) == {"inspection": "", "undeclared": "", "checks": [{
+        "id": "copy", "status": "", "evidence": "", "scenario": "打开页面", "expected": "显示中文",
+        "method": "manual"}]}
+    # Submitted unfilled, the template is refused instead of being recorded as a pass.
+    refused = cli("execution", "accept", "001", "--evidence-file", "planning/acceptance-001.json")
+    assert refused.returncode == 1 and "审查结论" in refused.stderr
+    assert cli("acceptance", "001", "--template").returncode == 1  # Filled-in work is not overwritten.
+    proof.write_text(json.dumps({**evidence(), "undeclared": "stray.txt 是草稿，留在工作区不提交"}), encoding="utf-8")
+    assert "编辑 planning/acceptance-001.json，逐项填写证据" in steps()
+    accepted = cli("execution", "accept", "001", "--evidence-file", "planning/acceptance-001.json")
+    assert accepted.returncode == 0, accepted.stderr
+    assert steps()[-1] == "integrate 001 --commit <提交 SHA>"
+    missing = cli("execution", "inspect", "002")
+    assert missing.returncode == 1 and "找不到执行记录或任务 002" in missing.stderr
+
+
+def test_next_steps_for_a_dispatched_task_follow_its_record(project, tmp_path):
+    workflow = Workflow(project)
+
+    def steps():
+        shown = subprocess.run([sys.executable, str(SKILL / "tools/cli.py"), "show", "001"],
+                               cwd=project, capture_output=True, text=True)
+        return shown.stdout.split("## 下一步", 1)[1]
+
+    assert "run 001 --dispatcher <调度模型ID>" in steps()
+    execution_id = workflow.begin("001")["execution_id"]
+    assert "execution finish 001 --outcome returned" in steps()
+    workflow.finish(execution_id, "returned")
+    assert "execution audit 001" in steps()
+    audited(workflow, execution_id, tmp_path)
+    assert "execution audit" not in steps() and "execution accept 001" in steps()
+    workflow.retry(execution_id, "实际模型不可用", block=True)
+    assert "execution unblock 001 --reason" in steps()
+    workflow.unblock(execution_id, "用户已恢复模型服务")
+    assert "run 001 --dispatcher <调度模型ID>" in steps()
+
+
+def test_evidence_template_refuses_a_task_id_that_cannot_name_a_file(project):
+    # save_document skips the id check that add applies, like a board edited by hand.
+    save_plan(project, plan_task("../../../escape"))
+    made = subprocess.run([sys.executable, str(SKILL / "tools/cli.py"), "acceptance", "../../../escape", "--template"],
+                          cwd=project, capture_output=True, text=True)
+    assert made.returncode == 1 and "不能用作文件名" in made.stderr
+    assert not (project / "escape.json").exists() and not (project / "planning" / "acceptance-..").exists()

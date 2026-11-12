@@ -14,7 +14,6 @@ try:
         ManagedTaskError,
         _normalize_task,
         _normalize_task_num,
-        executable_tasks,
         extract_acceptance_commands,
         find_task,
         open_tasks_sorted,
@@ -30,7 +29,6 @@ except ImportError:
         ManagedTaskError,
         _normalize_task,
         _normalize_task_num,
-        executable_tasks,
         extract_acceptance_commands,
         find_task,
         open_tasks_sorted,
@@ -160,13 +158,10 @@ class TaskBoard:
 
         return self._update(task_id, change)
 
-    def get_next_task(self) -> dict | None:
-        """获取下一个可执行的任务"""
-        document = self.get_document()
-        tasks = executable_tasks(document)
-        if not tasks:
-            return None
-        return tasks[0]
+    def get_next_task(self, roles: dict | None = None) -> dict | None:
+        """下一个可以开始的任务，即 select_batch 的第一项；已开始或停下等人处理的任务不算"""
+        batch = self.select_batch(roles, max_parallel=1)["batch"]
+        return batch[0] if batch else None
 
     def select_batch(self, roles: dict | None = None, max_parallel: int = 2) -> dict:
         """挑出下一批可以并行执行的任务，见 store.select_parallel_batch"""

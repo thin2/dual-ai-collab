@@ -298,29 +298,6 @@ def dependency_satisfied(tasks: list[dict], dep_num: str) -> bool:
     return False
 
 
-def all_dependencies_satisfied(tasks: list[dict], deps) -> bool:
-    """检查所有依赖是否满足"""
-    dep_list = dependency_ids(deps)
-    if not dep_list:
-        return True
-    return all(dependency_satisfied(tasks, dep) for dep in dep_list)
-
-
-def executable_tasks(document: dict) -> list[dict]:
-    """获取可执行的任务（依赖已满足）"""
-    tasks = document.get("tasks", [])
-    result = []
-
-    for task in tasks:
-        status = task.get("status", "PENDING")
-        if status in ["DONE", "AWAITING_INTEGRATION"]:
-            continue
-        if all_dependencies_satisfied(tasks, task.get("dependencies")):
-            result.append(task)
-
-    return sorted(result, key=_task_sort_key)
-
-
 def open_tasks_sorted(document: dict) -> list[dict]:
     """获取所有未完成的任务（按优先级排序）"""
     tasks = document.get("tasks", [])

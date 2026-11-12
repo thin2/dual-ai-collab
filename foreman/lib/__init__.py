@@ -8,7 +8,6 @@ from .executor import TaskExecutor
 from .history import ExecutionHistory, ExecutionRecord
 from .store import (
     TaskStoreError,
-    executable_tasks,
     extract_acceptance_commands,
     find_task,
     read_tasks_document,
@@ -35,7 +34,6 @@ __all__ = [
     "read_tasks_document",
     "write_tasks_document",
     "find_task",
-    "executable_tasks",
     "extract_acceptance_commands",
     "select_parallel_batch",
     "TeamError",
