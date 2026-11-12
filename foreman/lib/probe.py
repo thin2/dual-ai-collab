@@ -38,12 +38,12 @@ def verify_receipt(root: Path, dispatcher: str, executable: str):
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        raise ValueError("先运行 preflight --dispatcher <用户选定 ID> 验证沙箱") from exc
+        raise ValueError("先运行 foreman preflight --dispatcher <用户选定 ID> 验证沙箱") from exc
     if not (data.get("ok") and data.get("dispatcher") == dispatcher
             and data.get("autonomy") == AUTONOMY
             and data.get("executable") == fingerprint(executable)
             and data.get("policy") == policy_fingerprint(root)):
-        raise ValueError("沙箱探针未通过或环境已变化，必须重新运行 preflight")
+        raise ValueError("沙箱探针未通过或环境已变化，必须重新运行 foreman preflight --dispatcher <用户选定 ID>")
 
 
 def run_probe(root: Path, dispatcher: str, executable: str = "droid",

@@ -144,7 +144,7 @@ def configure_role(
         raise TeamError("角色描述不能为空")
     known = {m["id"] for m in list_byok_models(settings_path)}
     if model not in known:
-        raise TeamError(f"模型不在 BYOK 列表中: {model}。先运行 models 查看可用的模型 ID")
+        raise TeamError(f"模型不在 BYOK 列表中: {model}。先运行 foreman models 查看可用的模型 ID")
 
     path = _droid_path(project_root, role)
     if path.exists() and MANAGED_MARKER not in path.read_text(encoding="utf-8") and not force:

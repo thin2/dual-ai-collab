@@ -37,13 +37,13 @@ description: 需求规划、任务拆分、依赖分析、任务板维护、断�
 
 `init` 在**目标项目根目录**运行。其他命令在项目根目录或它的子目录运行都可以：命令从当前目录向上找 `planning/tasks.json` 或 `.task-management/config.json`，不越过 git 仓库的根目录，找到的目录不是当前目录时在标准错误输出里打印“项目根目录”。找不到时按当前目录处理并提示先 `init`。
 
-```bash
-TM=<本技能目录>/tools/cli.py
+命令是本技能目录下的 `bin/foreman`。下文和命令输出里的 `foreman ...` 都指它：`command -v foreman` 找不到时，把开头的 `foreman` 换成完整路径 `<本技能目录>/bin/foreman`。
 
-python3 $TM checkpoint check   # 有没有上次留下的进度
-python3 $TM show               # 任务板：编号、状态、由谁执行、还在等哪些依赖
-python3 $TM show 001           # 单个任务的上下文、当前状态和下一步要运行的命令
-python3 $TM init               # 新项目：创建 planning/、.task-management/ 和空任务板
+```bash
+foreman checkpoint check   # 有没有上次留下的进度
+foreman show               # 任务板：编号、状态、由谁执行、还在等哪些依赖
+foreman show 001           # 单个任务的上下文、当前状态和下一步要运行的命令
+foreman init               # 新项目：创建 planning/、.task-management/ 和空任务板
 ```
 
 任务数据在 `planning/tasks.json`，`planning/tasks.md` 是每次写入时生成的视图，不要手改。规划、任务板和当前会话直接执行只用 Python 标准库和 git；派发还需要 Droid。
@@ -130,7 +130,7 @@ python3 $TM init               # 新项目：创建 planning/、.task-management
 规格落盘后保存规划阶段的 checkpoint，新会话可以从规格文件接着访谈：
 
 ```bash
-python3 $TM checkpoint save --phase planning --data spec_file=planning/specs/<规格文件名>.md
+foreman checkpoint save --phase planning --data spec_file=planning/specs/<规格文件名>.md
 ```
 
 **任务板**：把任务写成 JSON 文件，再用 `add` 写入。`add` 在文件锁内追加；编号重复或字段不合格时一个都不写。
@@ -160,9 +160,9 @@ python3 $TM checkpoint save --phase planning --data spec_file=planning/specs/<�
 ```
 
 ```bash
-python3 $TM add --file planning/plan.json             # 文件里可以是一个任务、任务列表或 {"tasks": [...]}
-python3 $TM add --file planning/plan.json --replace   # 改写同编号的任务，只限待开始的任务
-python3 $TM show 001                                  # 写入后的完整任务上下文
+foreman add --file planning/plan.json             # 文件里可以是一个任务、任务列表或 {"tasks": [...]}
+foreman add --file planning/plan.json --replace   # 改写同编号的任务，只限待开始的任务
+foreman show 001                                  # 写入后的完整任务上下文
 ```
 
 新任务的状态固定从 PENDING 开始，之后的状态由执行流程写入。`--replace` 用于修改规划：只能改待开始（含等待返工）的任务，返工记录会保留。
@@ -176,7 +176,7 @@ python3 $TM show 001                                  # 写入后的完整任务
 先运行检查命令，有问题时退出码为 1：
 
 ```bash
-python3 $TM validate          # 加 --json 输出结构化结果
+foreman validate          # 加 --json 输出结构化结果
 ```
 
 它只读任务板，对每个未完成的任务检查执行时会被拒绝、或永远轮不到的情况：
@@ -209,7 +209,7 @@ python3 $TM validate          # 加 --json 输出结构化结果
 修改规划后重新运行 `validate`，再请用户确认。确认后保存 checkpoint：
 
 ```bash
-python3 $TM checkpoint save --phase developing --data spec_file=planning/specs/<规格文件名>.md task_file=planning/tasks.md
+foreman checkpoint save --phase developing --data spec_file=planning/specs/<规格文件名>.md task_file=planning/tasks.md
 ```
 #### 1.6 组建固定模型团队
 
@@ -218,27 +218,27 @@ python3 $TM checkpoint save --phase developing --data spec_file=planning/specs/<
 1. **主 Agent 提出角色，越少越好。** 按本项目的需求决定需要哪些角色，通常 1 到 3 个。每个角色写一句职责。不要套用固定的四人模板；两个角色总在改同一批文件时，合并成一个。
 2. **列出用户自己配置的模型（BYOK）：**
    ```bash
-   python3 $TM models
+   foreman models
    ```
    输出每个模型的 ID、名称和服务地址，不含密钥。
 3. **由用户选模型和线路。** 先展示全部目录的 ID、名称、provider 和端点，推荐只调整排序，不隐藏其他模型，不合并同名模型。用 AskUser 提供“推荐模型”“查看全部”“直接输入模型 ID”入口；选项数量有限时先展示完整表格，再让用户输入 ID，或分组翻页。用户已经给出完整 ID 时直接校验，不重复询问。模糊名称对应多条线路时才澄清，不能替用户选线路。
    ```bash
-   python3 $TM models --json --catalog
-   python3 $TM models --search "claude"  # 搜索仍显示目录总数，清除搜索恢复全部
-   python3 $TM models --recommend "custom:<用户可选的模型ID>"
+   foreman models --json --catalog
+   foreman models --search "claude"  # 搜索仍显示目录总数，清除搜索恢复全部
+   foreman models --recommend "custom:<用户可选的模型ID>"
    ```
    没有想用的模型时允许直接输入 ID。ID 未配置则说明缺失，请用户配置或明确选择已有模型，不擅自创建路由或回退。调度模型也由用户指定；记录完整 ID，不能因推荐、超时或权限错误而改变。
 4. **生成角色：**
    ```bash
-   python3 $TM team set backend --model "custom:<模型ID>" --description "接口、数据库和业务逻辑"
-   python3 $TM team set reviewer --model "custom:<另一个模型ID>" --description "独立审查改动" --read-only
+   foreman team set backend --model "custom:<模型ID>" --description "接口、数据库和业务逻辑"
+   foreman team set reviewer --model "custom:<另一个模型ID>" --description "独立审查改动" --read-only
    ```
    每个角色会生成 `.factory/droids/tm-<角色>.md`，`model` 写的是 settings 里的模型 ID，能精确指定线路。同时写入 `.task-management/config.json` 的 `roles`。
 5. **新角色需要新会话加载。** 受管 `run` 每次启动新的嵌套 Droid 会话，无需让用户重开主会话。直接使用当前会话 Task 时，先确认工具目录包含该角色；缺失则保存 checkpoint，重开会话，不换成其他角色。
 
 换模型：仅在用户指定新模型后重新运行 `team set`。新派发会加载新配置，旧执行仍按当时固定的模型审计。
 
-组队后再运行一次 `python3 $TM validate`，全部通过才进入执行阶段。
+组队后再运行一次 `foreman validate`，全部通过才进入执行阶段。
 
 任务通过 `role` 字段指定角色：
 
@@ -255,7 +255,7 @@ python3 $TM checkpoint save --phase developing --data spec_file=planning/specs/<
 #### 2.1 挑选一批任务
 
 ```bash
-python3 $TM batch --json
+foreman batch --json
 ```
 
 `batch` 列出可以同时开始的任务，`skipped` 列出暂时不能开始的任务及原因。每个任务的 `mode` 是 `direct`（当前会话直接执行，见 2.2）或 `dispatch`（派给角色，见 2.3 到 2.6）。两类可以同时进行：派发的任务在后台运行时，当前会话可以做一个直接执行的任务。挑选规则：
@@ -273,12 +273,12 @@ python3 $TM batch --json
 #### 2.2 当前会话直接执行（任务没写 role）
 
 ```bash
-python3 $TM execution begin 001     # 登记开始、记录文件基线，输出任务上下文
+foreman execution begin 001     # 登记开始、记录文件基线，输出任务上下文
 # 当前会话直接修改代码，只改任务 files 列出的路径
-python3 $TM execution finish 001 --outcome completed
-python3 $TM execution inspect 001
-python3 $TM acceptance 001 --template   # 生成 planning/acceptance-001.json，逐项填写
-python3 $TM execution accept 001 --evidence-file planning/acceptance-001.json
+foreman execution finish 001 --outcome completed
+foreman execution inspect 001
+foreman acceptance 001 --template   # 生成 planning/acceptance-001.json，逐项填写
+foreman execution accept 001 --evidence-file planning/acceptance-001.json
 ```
 
 不确定下一步时运行 `show 001`，末尾的“下一步”按任务当前状态列出要运行的命令。
@@ -293,8 +293,8 @@ python3 $TM execution accept 001 --evidence-file planning/acceptance-001.json
 #### 2.3 派发前检查模型、工具与隔离
 
 ```bash
-python3 $TM team check
-python3 $TM preflight --dispatcher "custom:<用户选定的调度模型ID>"
+foreman team check
+foreman preflight --dispatcher "custom:<用户选定的调度模型ID>"
 ```
 
 `team check` 仅检查配置和 TCP，不证明鉴权或实际模型调用成功。角色不可用时不要派发这个角色，不换模型。报告问题，确实需要用户处理服务或选新模型时用 AskUser。
@@ -310,8 +310,8 @@ python3 $TM preflight --dispatcher "custom:<用户选定的调度模型ID>"
 对 `batch` 返回的、`mode` 为 `dispatch` 的任务并行运行：
 
 ```bash
-python3 $TM run 001 --dispatcher "custom:<用户选定的调度模型ID>"
-python3 $TM run 002 --dispatcher "custom:<同一调度模型ID>"
+foreman run 001 --dispatcher "custom:<用户选定的调度模型ID>"
+foreman run 002 --dispatcher "custom:<同一调度模型ID>"
 ```
 
 使用工具支持的后台执行方式，等待实际完成事件。`run` 自动创建唯一 execution_id、保存已有文件摘要、标记 IN_PROGRESS，通过嵌套 `droid exec` 派发，随后登记进程结束时间、核对本次子 Agent 模型、同步 checkpoint。每次重试或纠正必须创建新记录。不会自动提交、重试或改模型。
@@ -333,7 +333,7 @@ python3 $TM run 002 --dispatcher "custom:<同一调度模型ID>"
 `run` 自动按唯一编号核对本次派发；手工桥接时运行：
 
 ```bash
-python3 $TM execution audit <execution_id>
+foreman execution audit <execution_id>
 ```
 
 必须找到唯一对应的子 Agent 记录且实际模型与派发时固定的 ID 一致。空结果、重复派发、缺失模型或不一致都不能当作通过。`team audit` 仍可浏览近期记录，但不能用旧记录替代本次核对。模型不符时保留文件，检查后 `execution block <execution_id> --reason "实际模型不符及文件检查结果"`，报告用户。
@@ -343,8 +343,8 @@ python3 $TM execution audit <execution_id>
 本节按派发的任务来写；当前会话直接执行的任务用同样的命令和证据格式，只是不需要模型核对。无论派发成功、失败还是权限拒绝，都先检查实际文件：
 
 ```bash
-python3 $TM execution inspect <execution_id>
-python3 $TM acceptance 001
+foreman execution inspect <execution_id>
+foreman acceptance 001
 ```
 
 `inspect` 给出新增、修改、删除的文件摘要，不代表实现正确，也不能断言变化都由子 Agent 产生。检查 `git diff` 和新增文件，保留原有用户改动。主 Agent 自己运行验收；没有命令或没有证据不能宣称通过。
@@ -359,9 +359,9 @@ python3 $TM acceptance 001
 这项检查基于 `git status` 和文件内容：被忽略的文件、`planning/` 目录、其他同时运行任务的 `files` 不计入；它不知道改动是谁做的，派发期间你或用户自己改的文件也会列出。
 
 ```bash
-python3 $TM execution accept <execution_id> --evidence-file planning/acceptance-001.json
+foreman execution accept <execution_id> --evidence-file planning/acceptance-001.json
 # 不完整：记录已完成部分与续做范围，保留文件，再派给原角色
-python3 $TM execution retry <execution_id> --reason "已完成列表；还需修复刷新冲突"
+foreman execution retry <execution_id> --reason "已完成列表；还需修复刷新冲突"
 ```
 
 `acceptance <任务ID> --template` 在 `planning/` 下生成验收 JSON 的框架：照抄每个验收条件，`status`、`evidence` 和 `inspection` 留空，有范围外改动时多一个空的 `undeclared`。原样提交会被 `accept` 拒绝；文件已存在时不覆盖，除非加 `--force`。证据放在 `planning/` 下不算范围外改动。验收 JSON 示例见 [运行与恢复](references/managed-workflow.md)。每个条件必须有 passed 和具体证据，另有实际文件审查结论。派发失败与独立验收通过可以同时成立；不会把派发结果改写成成功。超过重试上限会 BLOCKED。受管事件自动同步 checkpoint，不靠收尾补记耗时。
@@ -369,7 +369,7 @@ python3 $TM execution retry <execution_id> --reason "已完成列表；还需修
 BLOCKED 的受管任务要等用户处理（恢复模型、同意继续等），然后记录用户的决定来恢复，失败次数清零：
 
 ```bash
-python3 $TM execution unblock <execution_id> --reason "<用户的处理结果>"
+foreman execution unblock <execution_id> --reason "<用户的处理结果>"
 ```
 
 不要对 BLOCKED 任务用 retry，也不要直接改状态；任务一旦 `begin` 过，`update`、`fail` 和 Web 页面都会拒绝修改它的状态。
@@ -386,9 +386,9 @@ python3 $TM execution unblock <execution_id> --reason "<用户的处理结果>"
 
 ```bash
 # 审查通过
-python3 $TM execution accept <execution_id> --evidence-file planning/acceptance-001.json
+foreman execution accept <execution_id> --evidence-file planning/acceptance-001.json
 # 审查不通过：记录问题，回到 PENDING 交回原角色修复
-python3 $TM execution retry <execution_id> --reason "<实际文件检查结果及审查发现的问题>"
+foreman execution retry <execution_id> --reason "<实际文件检查结果及审查发现的问题>"
 ```
 
 ### 4. 集成确认
@@ -396,19 +396,19 @@ python3 $TM execution retry <execution_id> --reason "<实际文件检查结果�
 用户授权提交后，按任务分别提交，然后确认集成：
 
 ```bash
-python3 $TM integrate 001 --commit <提交 SHA> --note "说明"
+foreman integrate 001 --commit <提交 SHA> --note "说明"
 ```
 
 `begin` 过的任务（两种执行方式都是）会检查逐项验收、验收后文件是否变化，以及提交是否包含 files 和 runtime_dependencies；派发的任务还要求实际模型核对通过。验收时会同时记下 runtime_dependencies 的声明和内容摘要，之后依赖内容或声明有变化都需要重新验收。不满足则拒绝集成。该命令不提交、不合并，只核对你给出的提交。从未 `begin` 过的旧任务只记录提交，不做这些检查。
 
-交付前运行 `python3 $TM delivery --commit <SHA> --paths <完整运行依赖路径...>`，再在临时干净检出中运行项目启动与验收命令。只检查工作区不能证明提交可运行。若用户要求保留依赖为未提交状态，明确记录交付阻塞，不能擅自提交这些依赖或声称可独立复现。
+交付前运行 `foreman delivery --commit <SHA> --paths <完整运行依赖路径...>`，再在临时干净检出中运行项目启动与验收命令。只检查工作区不能证明提交可运行。若用户要求保留依赖为未提交状态，明确记录交付阻塞，不能擅自提交这些依赖或声称可独立复现。
 
 ### 5. Checkpoint 管理
 
 ```bash
-python3 $TM checkpoint save --phase developing --data current_task=003 task_file=planning/tasks.md
-python3 $TM checkpoint check
-python3 $TM checkpoint clear
+foreman checkpoint save --phase developing --data current_task=003 task_file=planning/tasks.md
+foreman checkpoint check
+foreman checkpoint clear
 ```
 
 `execution` 命令和 `integrate` 会自动同步 checkpoint 里的任务进度，并保留规格路径等已有内容。Checkpoint 只是游标：用任务的 sections 记录约束、关键决策和未完成项，详细材料放在规格文件里。新会话靠这些文件恢复，不能指望还记得上一个会话的对话。
@@ -418,9 +418,9 @@ python3 $TM checkpoint clear
 新会话中先运行：
 
 ```bash
-python3 $TM checkpoint check
-python3 $TM execution recover
-python3 $TM show
+foreman checkpoint check
+foreman execution recover
+foreman show
 ```
 
 派发的任务：先确认旧进程是否仍在执行，不能因为记录是 running 就自动重试。确认已停止后登记 `execution finish <execution_id> --outcome interrupted`；实际结束时间未知时保持为空，不用当前时间伪造耗时。然后 inspect，核对本次模型，逐项验收或带检查结论 retry/block。
@@ -451,15 +451,15 @@ python3 $TM show
 }
 ```
 
-`roles` 由 `team set` 维护，不要手改。并发和重试上限用 `python3 $TM config set parallel.max_parallel=3` 修改，`config show` 查看全部配置。
+`roles` 由 `team set` 维护，不要手改。并发和重试上限用 `foreman config set parallel.max_parallel=3` 修改，`config show` 查看全部配置。
 
 `execution` 只用于 2.2 最后一条：当前会话想把直接执行任务的一部分交给通用子 Agent 时，按任务复杂度选 droid（`config set execution.medium=<droid>`）。复杂度的判定顺序：任务的 `execution_level`（quick → light，normal → medium，heavy → heavy）；任务类型（docs、test → light，feature、bugfix → medium，refactor、architecture → heavy）；预估时间（≤1 小时 light，≤3 小时 medium，更长 heavy）；都没有时是 medium。
 
 ## 执行历史
 
 ```bash
-python3 $TM history                  # 最近的执行记录
-python3 $TM history --task-id 001
+foreman history                  # 最近的执行记录
+foreman history --task-id 001
 ```
 
 当前会话直接执行的记录，droid 一栏是 `current-session`，没有模型。
@@ -467,7 +467,7 @@ python3 $TM history --task-id 001
 ## 可视化
 
 ```bash
-python3 $TM show --mermaid > planning/dependencies.mmd   # 依赖图，箭头从被依赖的任务指向依赖它的任务
+foreman show --mermaid > planning/dependencies.mmd   # 依赖图，箭头从被依赖的任务指向依赖它的任务
 ```
 
 ## 最佳实践
@@ -484,7 +484,7 @@ python3 $TM show --mermaid > planning/dependencies.mmd   # 依赖图，箭头从
 
 ### 任务板不存在
 ```bash
-python3 $TM init
+foreman init
 ```
 
 ### 命令说“任务板没有任务”，但项目里有任务
@@ -504,7 +504,7 @@ python3 $TM init
 
 ### 依赖循环或任务一直不被挑中
 ```bash
-python3 $TM validate
+foreman validate
 ```
 `add` 不检查依赖；`validate` 会列出依赖环、不存在的依赖和缺失的字段。
 
@@ -516,13 +516,13 @@ python3 $TM validate
 
 ### 配置丢失
 ```bash
-python3 $TM init    # 补写默认配置，不动已有任务板
+foreman init    # 补写默认配置，不动已有任务板
 ```
 
 ### Droid 不存在
 Task 报 `Droid configuration not found` 时：
 
-1. 运行 `python3 $TM team check`，确认 `.factory/droids/tm-<角色>.md` 存在。
+1. 运行 `foreman team check`，确认 `.factory/droids/tm-<角色>.md` 存在。
 2. 文件是本会话中途生成或修改的：保存 checkpoint，开新会话再继续。
 
 ## 与其他工具配合
@@ -531,7 +531,7 @@ Task 报 `Droid configuration not found` 时：
 可选的任务监控界面，见仓库中的 `web_server.py`。
 
 ### CLI 工具
-`tools/cli.py` 提供命令行接口，便于脚本和 CI 集成。
+`bin/foreman` 是命令行入口（等同于 `python3 tools/cli.py`），可以在脚本和 CI 里调用。
 
 ### Git 集成
 任务完成后，建议的提交流程：

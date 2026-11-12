@@ -19,11 +19,12 @@
 
 **安装**：
 ```bash
-python3 install.py --profile foreman
-# 默认安装到 ~/.factory/skills/foreman
+python3 install.py --profile foreman --bin-dir ~/.local/bin
+# 技能默认安装到 ~/.factory/skills/foreman
+# --bin-dir 在这个目录创建 foreman 命令的链接；目录要在 PATH 里
 ```
 
-安装的是完整副本，不依赖本仓库的位置。
+安装的是完整副本，不依赖本仓库的位置。之后在自己的项目目录里运行 `foreman init`、`foreman show` 等命令；不加 `--bin-dir` 时用完整路径 `~/.factory/skills/foreman/bin/foreman`。
 
 **详细文档**：[foreman/README.md](./foreman/README.md)
 
@@ -110,8 +111,9 @@ dual-ai-collab/
 ├── foreman/                  # 当前版本：规划、任务板和执行管理
 │   ├── SKILL.md
 │   ├── README.md
+│   ├── bin/foreman           # 命令入口
 │   ├── lib/                  # 核心库
-│   ├── tools/                # CLI 工具
+│   ├── tools/                # CLI 实现
 │   └── references/
 ├── skill/                    # 旧版 dual-ai-collab（不再更新）
 │   ├── dual-ai-collab.md

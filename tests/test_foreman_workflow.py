@@ -468,6 +468,10 @@ def test_installed_profile_contains_managed_entrypoints(tmp_path):
                          cwd=tmp_path, capture_output=True, text=True)
     assert cli.returncode == 0, cli.stderr
     assert all(command in cli.stdout for command in ("preflight", "execution", "delivery"))
+    # bin/foreman is the same program under the name its own output tells people to type.
+    launcher = subprocess.run([str(target / "bin/foreman"), "--help"], cwd=tmp_path, capture_output=True, text=True)
+    assert launcher.returncode == 0, launcher.stderr
+    assert launcher.stdout == cli.stdout and cli.stdout.startswith("usage: foreman ")
 
 
 def accepted_run(workflow, tmp_path):
@@ -988,7 +992,7 @@ def test_receipt_from_another_autonomy_level_requires_a_new_preflight(project):
         verify_receipt(project, "custom:dispatcher", "droid")
         for stale in ({**data, "autonomy": "low"}, {k: v for k, v in data.items() if k != "autonomy"}):
             receipt.write_text(json.dumps(stale))
-            with pytest.raises(ValueError, match="重新运行 preflight"):
+            with pytest.raises(ValueError, match="重新运行 foreman preflight"):
                 verify_receipt(project, "custom:dispatcher", "droid")
 
 
@@ -1239,14 +1243,14 @@ def test_next_steps_lead_a_direct_task_through_the_cli_by_task_id(project):
     def steps():
         return cli("show", "001").stdout.split("## 下一步", 1)[1].splitlines()[1:]
 
-    assert steps() == ["execution begin 001   # 登记开始，然后由当前会话实现"]
+    assert steps() == ["foreman execution begin 001   # 登记开始，然后由当前会话实现"]
     assert cli("execution", "begin", "001").returncode == 0
-    assert steps()[1].startswith("execution finish 001 --outcome completed")
+    assert steps()[1].startswith("foreman execution finish 001 --outcome completed")
     (project / "page-001.txt").write_text("中文\n")
     (project / "stray.txt").write_text("顺手改的")
     finished = cli("execution", "finish", "001", "--outcome", "completed")
     assert finished.returncode == 0, finished.stderr
-    assert "acceptance 001 --template   # 生成 planning/acceptance-001.json，逐项填写证据" in steps()
+    assert "foreman acceptance 001 --template   # 生成 planning/acceptance-001.json，逐项填写证据" in steps()
     assert json.loads(cli("execution", "inspect", "1").stdout)["undeclared"]["paths"] == ["stray.txt"]
     made = cli("acceptance", "001", "--template")
     assert made.returncode == 0 and "stray.txt" in made.stdout
@@ -1262,7 +1266,7 @@ def test_next_steps_lead_a_direct_task_through_the_cli_by_task_id(project):
     assert "编辑 planning/acceptance-001.json，逐项填写证据" in steps()
     accepted = cli("execution", "accept", "001", "--evidence-file", "planning/acceptance-001.json")
     assert accepted.returncode == 0, accepted.stderr
-    assert steps()[-1] == "integrate 001 --commit <提交 SHA>"
+    assert steps()[-1] == "foreman integrate 001 --commit <提交 SHA>"
     missing = cli("execution", "inspect", "002")
     assert missing.returncode == 1 and "找不到执行记录或任务 002" in missing.stderr
 
@@ -1275,17 +1279,17 @@ def test_next_steps_for_a_dispatched_task_follow_its_record(project, tmp_path):
                                cwd=project, capture_output=True, text=True)
         return shown.stdout.split("## 下一步", 1)[1]
 
-    assert "run 001 --dispatcher <调度模型ID>" in steps()
+    assert "foreman run 001 --dispatcher <调度模型ID>" in steps()
     execution_id = workflow.begin("001")["execution_id"]
-    assert "execution finish 001 --outcome returned" in steps()
+    assert "foreman execution finish 001 --outcome returned" in steps()
     workflow.finish(execution_id, "returned")
-    assert "execution audit 001" in steps()
+    assert "foreman execution audit 001" in steps()
     audited(workflow, execution_id, tmp_path)
-    assert "execution audit" not in steps() and "execution accept 001" in steps()
+    assert "execution audit" not in steps() and "foreman execution accept 001" in steps()
     workflow.retry(execution_id, "实际模型不可用", block=True)
-    assert "execution unblock 001 --reason" in steps()
+    assert "foreman execution unblock 001 --reason" in steps()
     workflow.unblock(execution_id, "用户已恢复模型服务")
-    assert "run 001 --dispatcher <调度模型ID>" in steps()
+    assert "foreman run 001 --dispatcher <调度模型ID>" in steps()
 
 
 def test_evidence_template_refuses_a_task_id_that_cannot_name_a_file(project):

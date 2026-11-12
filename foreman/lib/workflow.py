@@ -230,7 +230,7 @@ class Workflow:
         if not task:
             raise ValueError(f"找不到执行记录或任务 {value}")
         if not task.get("execution_id"):
-            raise ValueError(f"任务 {task['id']} 还没有执行记录；先运行 execution begin {task['id']}")
+            raise ValueError(f"任务 {task['id']} 还没有执行记录；先运行 foreman execution begin {task['id']}")
         return task["execution_id"]
 
     def _record(self, execution_id):
@@ -333,7 +333,7 @@ class Workflow:
                 plan["droid"] = CURRENT_SESSION
                 plan["instruction"] = (
                     "由当前会话直接实现，只修改 files 列出的路径。"
-                    f"做完后运行 execution finish {execution_id} --outcome completed，"
+                    f"做完后运行 foreman execution finish {execution_id} --outcome completed，"
                     "再 execution inspect、逐项验收并 execution accept。"
                 )
                 return plan
@@ -451,7 +451,7 @@ class Workflow:
             task = self._latest(record)
             direct = is_direct(record)
             if record.status == "running":
-                raise ValueError("先运行 execution finish --outcome completed 登记做完" if direct else
+                raise ValueError("先运行 foreman execution finish <任务ID> --outcome completed 登记做完" if direct else
                                  "先登记派发结束；中断时用 interrupted，未知结束时间保持为空")
             if task["status"] not in {"AWAITING_REVIEW", "AWAITING_INTEGRATION"}:
                 raise ValueError("任务已集成或已决定重新派发，不能用旧记录重新验收")
@@ -559,7 +559,7 @@ class Workflow:
                 raise ValueError("受管任务需要在当前已验收仓库集成；跨仓库须单独验收")
             report = delivery_check(self.root, commit, record.details["files"] + dependencies)
             if not report["ok"]:
-                raise ValueError("提交未包含全部已验收文件或运行依赖；先运行 delivery 查看缺失路径")
+                raise ValueError("提交未包含全部已验收文件或运行依赖；先运行 foreman delivery --commit <SHA> --paths <路径...> 查看缺失路径")
 
     def integrate(self, task_id: str, commit: str, repo: Path, note: str = "") -> dict:
         """Check, record the commit and mark DONE under one lock so nothing interleaves."""

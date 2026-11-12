@@ -33,7 +33,7 @@ class TaskExecutor:
             entry = self.config.get_role(role)
             if not entry:
                 raise ValueError(
-                    f"任务 {task_id} 的角色 {role} 未配置；先运行 team set {role} --model <模型ID> --description <职责>"
+                    f"任务 {task_id} 的角色 {role} 未配置；先运行 foreman team set {role} --model <模型ID> --description <职责>"
                 )
             droid = entry["droid"]
             model = entry.get("model")

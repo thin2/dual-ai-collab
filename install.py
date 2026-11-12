@@ -31,6 +31,51 @@ def copy_tree(src: Path, dst: Path) -> None:
             copy_file(path, target)
 
 
+LAUNCHER = Path("bin") / "foreman"
+
+
+def _is_foreman_launcher(path: Path) -> bool:
+    skill = path.parent.parent
+    return path.name == "foreman" and (skill / "SKILL.md").is_file() and (skill / "tools" / "cli.py").is_file()
+
+
+def check_link(link: Path) -> None:
+    """Refuse to replace anything except a dangling link or a link to a foreman launcher.
+
+    Other programs are also called foreman (the Ruby Procfile runner, for one).
+    """
+    if not link.is_symlink() and not link.exists():
+        return
+    if not link.is_symlink() or (link.exists() and not _is_foreman_launcher(link.resolve())):
+        raise RuntimeError(f"{link} 已存在，而且不是 foreman 技能的链接；换一个 --bin-dir，或确认不需要后自己删除它")
+
+
+def link_launcher(launcher: Path, link: Path) -> None:
+    check_link(link)
+    link.parent.mkdir(parents=True, exist_ok=True)
+    if link.is_symlink():
+        link.unlink()
+    link.symlink_to(launcher)
+
+
+def launcher_notes(launcher: Path, link: Path | None) -> list[str]:
+    """What to type to run the installed skill, given what `foreman` resolves to on PATH."""
+    found = shutil.which("foreman")
+    on_path = bool(found) and Path(found).resolve() == launcher.resolve()
+    notes = [f"command: {'foreman' if on_path else launcher}"]
+    if link:
+        notes.append(f"link: {link} -> {launcher}")
+    if on_path:
+        return notes
+    if found:
+        notes.append(f"提示：PATH 里的 foreman 是另一个程序（{found}）；使用上面的完整路径，或调整 PATH 的顺序")
+    elif link:
+        notes.append(f"提示：{link.parent} 不在 PATH 里；加入 PATH 后可以直接输入 foreman，在那之前使用上面的完整路径")
+    else:
+        notes.append("提示：想直接输入 foreman，加 --force --bin-dir <PATH 里的目录>（例如 ~/.local/bin）重新安装")
+    return notes
+
+
 def install(target_dir: Path, source_root: Path, force: bool, profile: str = "full") -> None:
     if profile not in {"full", "foreman"}:
         raise ValueError(f"Unknown profile: {profile}")
@@ -44,6 +89,8 @@ def install(target_dir: Path, source_root: Path, force: bool, profile: str = "fu
         if target_dir.exists() and any(target_dir.iterdir()) and not force:
             raise RuntimeError(f"目标目录已存在且非空: {target_dir}；覆盖需 --force")
         copy_tree(source, target_dir)
+        # The source may come from an archive or a filesystem that dropped the mode bits.
+        (target_dir / LAUNCHER).chmod(0o755)
         print("提示：规划、任务板和当前会话直接执行可立即使用；派发给固定模型角色需要 Droid")
         return
 
@@ -90,7 +137,14 @@ def main() -> None:
         default="foreman",
         help="foreman: 规划、任务板和执行管理 (默认，已包含原 planning 技能), full: 旧版 dual-ai-collab"
     )
+    parser.add_argument(
+        "--bin-dir",
+        default=None,
+        help="只用于 foreman：在这个目录创建 foreman 命令的链接（目录应在 PATH 里，例如 ~/.local/bin）",
+    )
     args = parser.parse_args()
+    if args.bin_dir and args.profile != "foreman":
+        parser.error("--bin-dir 只用于 --profile foreman")
 
     source_root = Path(args.source).expanduser().resolve()
 
@@ -101,9 +155,15 @@ def main() -> None:
         default_target = Path("~/.claude/skills/dual-ai-collab")
 
     target_dir = Path(args.target or default_target).expanduser().resolve()
+    # Only the directory is resolved: the link itself may already exist and must not be followed.
+    link = Path(args.bin_dir).expanduser().resolve() / "foreman" if args.bin_dir else None
 
     try:
+        if link:
+            check_link(link)  # before copying, so a refused link leaves nothing half installed
         install(target_dir, source_root, force=args.force, profile=args.profile)
+        if link:
+            link_launcher(target_dir / LAUNCHER, link)
     except (FileNotFoundError, RuntimeError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         raise SystemExit(1) from None
@@ -111,6 +171,8 @@ def main() -> None:
     print("INSTALL_OK")
     print(f"source: {source_root}")
     print(f"target: {target_dir}")
+    if args.profile == "foreman":
+        print("\n".join(launcher_notes(target_dir / LAUNCHER, link)))
 
 
 if __name__ == "__main__":

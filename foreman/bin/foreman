@@ -1,0 +1,7 @@
+#!/usr/bin/env python3
+"""foreman 命令：与 python3 <技能目录>/tools/cli.py 是同一个程序。"""
+import runpy
+from pathlib import Path
+
+# resolve() 跟随符号链接：本文件被链接到 PATH 里的目录后，仍能找到技能目录
+runpy.run_path(str(Path(__file__).resolve().parent.parent / "tools" / "cli.py"), run_name="__main__")

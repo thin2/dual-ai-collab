@@ -52,13 +52,12 @@ python3 web_server.py 5001            # 端口可省略，默认 5001
 
 ## 和 CLI 一起用
 
-页面和 foreman CLI 读写同一个任务板。在项目里用 CLI 写入或推进任务，页面下一次刷新就能看到：
+页面和 foreman CLI 读写同一个任务板。在项目里用 CLI 写入或推进任务，页面下一次刷新就能看到。`foreman` 是技能目录下的 `bin/foreman`（安装时加 `--bin-dir` 可以链接到 `PATH`；在本仓库里是 `foreman/bin/foreman`）：
 
 ```bash
-TM=~/.factory/skills/foreman/tools/cli.py   # 已安装的技能；在本仓库里也可以用 foreman/tools/cli.py
 cd /path/to/project
-python3 $TM add --file planning/plan.json
-python3 $TM show
+foreman add --file planning/plan.json
+foreman show
 ```
 
 ## 接口
@@ -96,7 +95,7 @@ GET  /api/specs/<文件名>                    规划文档内容（超过 1 MiB
 ### 页面显示 Internal server error
 服务不把错误细节发给页面，也不写进终端日志，避免泄露文件内容。通常是项目里某个数据文件不是合法的 JSON：
 
-- 任务板：在项目目录运行 `python3 $TM show`，损坏时会报出文件和位置。
+- 任务板：在项目目录运行 `foreman show`，损坏时会报出文件和位置。
 - 配置、checkpoint 和执行记录：用 `python3 -m json.tool <文件>` 逐个检查 `.task-management/config.json`、`.task-management/checkpoint.json` 和 `.task-management/history/*.json`。CLI 读到损坏的配置或 checkpoint 时会按“没有”处理，不报错。
 
 ### 项目未登记（404）或项目目录不存在（409）

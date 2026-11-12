@@ -98,6 +98,6 @@ def check_plan(root: Path) -> dict:
         problem(cycle[0], "dependencies", "依赖成环：" + " → ".join(cycle))
 
     team = [{"role": role, "tasks": ids,
-             "problem": f"角色尚未配置模型；运行 team set {role} --model <模型ID> --description <职责>"}
+             "problem": f"角色尚未配置模型；运行 foreman team set {role} --model <模型ID> --description <职责>"}
             for role, ids in unready.items()]
     return {"ok": not board and not team, "checked": checked, "direct": direct, "board": board, "team": team}

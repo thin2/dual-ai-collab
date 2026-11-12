@@ -38,6 +38,9 @@ def _print_json(data) -> None:
     print(json.dumps(data, ensure_ascii=False, indent=2))
 
 
+# 输出里要接着运行的命令都以它开头；它是技能目录下的 bin/foreman
+CLI = "foreman"
+
 # init、add、team set 或 config set 之后至少有其中一个
 PROJECT_MARKERS = ("planning/tasks.json", "planning/codex-tasks.json", ".task-management/config.json")
 
@@ -61,7 +64,7 @@ def resolve_root(command: str) -> Path:
     found = find_project_root(cwd)
     if found is None:
         if command != "models":
-            print(f"提示: {cwd} 及其上级目录没有任务板或配置，按当前目录处理；新项目先运行 init", file=sys.stderr)
+            print(f"提示: {cwd} 及其上级目录没有任务板或配置，按当前目录处理；新项目先运行 {CLI} init", file=sys.stderr)
         return cwd
     if found != cwd:
         print(f"项目根目录: {found}", file=sys.stderr)
@@ -146,7 +149,7 @@ def cmd_add(args):
         raise ValueError("文件内容应是一个任务对象、任务列表，或 {\"tasks\": [...]}")
     written = TaskBoard.load(args.root).add_tasks(tasks, replace=args.replace)
     print(f"已写入 {len(written)} 个任务: {'、'.join(written)}")
-    print("接着运行 validate 检查字段、依赖和角色")
+    print(f"接着运行 {CLI} validate 检查字段、依赖和角色")
 
 
 def cmd_show(args):
@@ -192,14 +195,14 @@ def cmd_show(args):
         print(f"执行编号: {task['execution_id']}")
     steps = _next_steps(Workflow(args.root), task)
     if steps:
-        print("\n## 下一步（tools/cli.py 的子命令）")
+        print("\n## 下一步")
         print("\n".join(steps))
 
 
 def _start_command(task: dict) -> str:
     if task.get("role"):
-        return f"run {task['id']} --dispatcher <调度模型ID>   # 派给角色 {task['role']}；先 team check 和 preflight"
-    return f"execution begin {task['id']}   # 登记开始，然后由当前会话实现"
+        return f"{CLI} run {task['id']} --dispatcher <调度模型ID>   # 派给角色 {task['role']}；先 team check 和 preflight"
+    return f"{CLI} execution begin {task['id']}   # 登记开始，然后由当前会话实现"
 
 
 def _next_steps(workflow: Workflow, task: dict) -> list[str]:
@@ -218,32 +221,32 @@ def _next_steps(workflow: Workflow, task: dict) -> list[str]:
         if tid in {item["id"] for item in selection["batch"]}:
             return [_start_command(task)]
         reason = next((item["reason"] for item in selection["skipped"] if item["id"] == tid), None)
-        return [f"暂时不能开始：{reason}" if reason else "暂时不能开始；运行 batch 查看原因"]
+        return [f"暂时不能开始：{reason}" if reason else f"暂时不能开始；运行 {CLI} batch 查看原因"]
     if not record:
         if status == "BLOCKED":
-            return ["等用户处理阻塞原因", f"update {tid} PENDING --reset-retries   # 没有执行记录的旧任务"]
+            return ["等用户处理阻塞原因", f"{CLI} update {tid} PENDING --reset-retries   # 没有执行记录的旧任务"]
         return ["没有执行记录的旧任务：用 update 改状态，用 integrate 确认集成"]
     if status == "IN_PROGRESS":
         if is_direct(record):
             return ["由当前会话实现，只改 files 列出的路径",
-                    f"execution finish {tid} --outcome completed   # 没做完用 failed，被打断用 interrupted"]
+                    f"{CLI} execution finish {tid} --outcome completed   # 没做完用 failed，被打断用 interrupted"]
         return ["派发进行中。run 结束时会自动登记；手工用 Task 派发的，返回后运行：",
-                f"execution finish {tid} --outcome returned   # 或 permission_rejected、failed、interrupted"]
+                f"{CLI} execution finish {tid} --outcome returned   # 或 permission_rejected、failed、interrupted"]
     if status == "AWAITING_REVIEW":
-        steps = [f"execution inspect {tid}   # 文件变化和 notices"]
+        steps = [f"{CLI} execution inspect {tid}   # 文件变化和 notices"]
         if record.details.get("audit", {}).get("status") not in {"passed", "not_applicable"}:
-            steps.append(f"execution audit {tid}   # 核对实际模型，通过后才能验收")
+            steps.append(f"{CLI} execution audit {tid}   # 核对实际模型，通过后才能验收")
         evidence = _evidence_path(board, task)
         relative = evidence.relative_to(board.project_root)
         steps.append(f"编辑 {relative}，逐项填写证据" if evidence.exists() else
-                     f"acceptance {tid} --template   # 生成 {relative}，逐项填写证据")
-        steps.append(f"execution accept {tid} --evidence-file {relative}")
-        steps.append(f"不完整时: execution retry {tid} --reason \"已完成的部分和还要做的事\"")
+                     f"{CLI} acceptance {tid} --template   # 生成 {relative}，逐项填写证据")
+        steps.append(f"{CLI} execution accept {tid} --evidence-file {relative}")
+        steps.append(f"不完整时: {CLI} execution retry {tid} --reason \"已完成的部分和还要做的事\"")
         return steps
     if status == "AWAITING_INTEGRATION":
-        return ["用户授权后提交 files 和 runtime_dependencies 里的改动", f"integrate {tid} --commit <提交 SHA>"]
+        return ["用户授权后提交 files 和 runtime_dependencies 里的改动", f"{CLI} integrate {tid} --commit <提交 SHA>"]
     if status == "BLOCKED":
-        return ["等用户处理阻塞原因", f"execution unblock {tid} --reason \"<用户的处理结果>\""]
+        return ["等用户处理阻塞原因", f"{CLI} execution unblock {tid} --reason \"<用户的处理结果>\""]
     return []
 
 
@@ -528,7 +531,7 @@ def cmd_acceptance(args):
               "没通过的条件不要写 passed，修复后重验。")
         if undeclared:
             print(f"执行期间声明范围外有改动：{'、'.join(undeclared)}；在 undeclared 字段写明来源和处理结论")
-        print(f"填好后运行: execution accept {task['id']} --evidence-file {path.relative_to(board.project_root)}")
+        print(f"填好后运行: {CLI} execution accept {task['id']} --evidence-file {path.relative_to(board.project_root)}")
         return
     if task and task.get("acceptance"):
         from lib.workflow import requirements
@@ -610,7 +613,7 @@ def cmd_delivery(args):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="任务管理 CLI")
+    parser = argparse.ArgumentParser(prog=CLI, description="Foreman 任务管理 CLI")
     subparsers = parser.add_subparsers(dest="command", help="命令")
 
     subparsers.add_parser("init", help="初始化项目")

@@ -25,22 +25,27 @@ Droid 原生任务管理技能 - 规划、拆分、执行和验收完整工作�
 ### 安装
 
 ```bash
-# 安装到 Factory/Droid
-python install.py --profile foreman
+# 安装到 Factory/Droid，并在 ~/.local/bin 里创建 foreman 命令的链接
+python3 install.py --profile foreman --bin-dir ~/.local/bin
 
-# 默认安装到 ~/.factory/skills/foreman
+# 技能默认安装到 ~/.factory/skills/foreman
 # 可通过 FACTORY_SKILLS 环境变量或 --target 自定义
 ```
+
+命令是技能目录下的 `bin/foreman`，下文都写作 `foreman`。
+
+- `--bin-dir` 指定的目录要在 `PATH` 里。安装脚本只创建一个链接，不修改 shell 配置；那里已经有别的 `foreman` 程序时会拒绝覆盖。
+- 不加 `--bin-dir` 时，用完整路径 `~/.factory/skills/foreman/bin/foreman` 运行。
+- 在本仓库里开发时，直接运行 `foreman/bin/foreman`。
 
 ### 初始化项目
 
 ```bash
 cd /path/to/your/project
-TM=~/.factory/skills/foreman/tools/cli.py
-python3 $TM init                          # 创建 planning/、.task-management/ 和空任务板
-python3 $TM add --file planning/plan.json # 写入任务（一个任务、任务列表或 {"tasks": [...]}）
-python3 $TM validate                      # 检查字段、依赖和角色
-python3 $TM show                          # 任务板：编号、状态、由谁执行、等待的依赖
+foreman init                          # 创建 planning/、.task-management/ 和空任务板
+foreman add --file planning/plan.json # 写入任务（一个任务、任务列表或 {"tasks": [...]}）
+foreman validate                      # 检查字段、依赖和角色
+foreman show                          # 任务板：编号、状态、由谁执行、等待的依赖
 ```
 
 `init` 之外的命令也可以在项目的子目录里运行：它们会向上找到有任务板或配置的目录（不越过 git 仓库根目录）。
@@ -64,9 +69,9 @@ python3 $TM show                          # 任务板：编号、状态、由谁
 **当前会话直接执行（任务没写 `role`）**：
 
 ```bash
-python3 $TM execution begin 001     # 登记开始、记录文件基线，输出任务上下文
+foreman execution begin 001     # 登记开始、记录文件基线，输出任务上下文
 # 当前会话直接修改代码，只改任务 files 列出的路径
-python3 $TM execution finish 001 --outcome completed
+foreman execution finish 001 --outcome completed
 ```
 
 `execution` 的子命令可以直接写任务 ID，表示该任务当前的执行记录；`show 001` 末尾会按任务状态列出下一步命令。
@@ -76,13 +81,12 @@ python3 $TM execution finish 001 --outcome completed
 **派给固定模型的角色（任务写了 `role`）**：
 
 ```bash
-TM=<本技能目录>/tools/cli.py
-python3 $TM models --json --catalog
+foreman models --json --catalog
 # 角色和调度器都使用用户选择的完整模型 ID
-python3 $TM team check
-python3 $TM preflight --dispatcher "custom:<调度模型ID>"
-python3 $TM batch --json
-python3 $TM run 001 --dispatcher "custom:<调度模型ID>"
+foreman team check
+foreman preflight --dispatcher "custom:<调度模型ID>"
+foreman batch --json
+foreman run 001 --dispatcher "custom:<调度模型ID>"
 ```
 
 `run` 自动创建唯一编号、记录文件基线、更新状态，通过嵌套 `droid exec` 派发（工具列表为 Task 加子 Agent 需要的读写工具，临时守卫只允许调度会话调用一次 Task），结束后记录进程结果、核对本次实际模型并同步 checkpoint。两种方式的任务都要声明 `files`、结构化 `acceptance` 和 `runtime_dependencies`；`run` 只接受写了 `role` 的任务。独立任务可按 batch 并行运行。嵌套进程以 `--auto medium` 在沙箱内运行，子 Agent 可以跑测试和构建，但不能联网、提交或写任务板；派发结果以子 Agent 自己的结束方式为准。
@@ -90,12 +94,12 @@ python3 $TM run 001 --dispatcher "custom:<调度模型ID>"
 ### 3. 验收和审查
 
 ```bash
-python3 $TM execution inspect 001
-python3 $TM acceptance 001 --template   # 生成 planning/acceptance-001.json，结论和证据待填写
+foreman execution inspect 001
+foreman acceptance 001 --template   # 生成 planning/acceptance-001.json，结论和证据待填写
 # 主 Agent 检查实际文件、运行验收并把观察证据填进文件后
-python3 $TM execution accept 001 --evidence-file planning/acceptance-001.json
+foreman execution accept 001 --evidence-file planning/acceptance-001.json
 # 不完整时保留文件，记录续做范围再派发
-python3 $TM execution retry 001 --reason "文件检查结论与还需完成的事项"
+foreman execution retry 001 --reason "文件检查结论与还需完成的事项"
 ```
 
 `inspect` 的 `notices` 会指出声明的文件完全没有变化，或派发期间有声明范围外的改动；后者必须在验收证据的 `undeclared` 字段说明。权限拒绝不代表没有写入文件，派发返回也不代表验收通过。`accept` 逐项检查证据和本次模型审计，保存独立时间戳；不会把失败派发改写成成功。证据格式、恢复和隔离边界见 [运行与恢复](references/managed-workflow.md)。
@@ -105,8 +109,8 @@ python3 $TM execution retry 001 --reason "文件检查结论与还需完成的�
 用户授权提交后，检查提交包含全部运行依赖，并在干净检出中启动和验收：
 
 ```bash
-python3 $TM delivery --commit <SHA> --paths <运行依赖路径...>
-python3 $TM integrate 001 --commit <SHA>
+foreman delivery --commit <SHA> --paths <运行依赖路径...>
+foreman integrate 001 --commit <SHA>
 ```
 
 受管任务缺少验收、模型审计、运行依赖，或验收后文件变化时不能集成。依赖被要求保留未提交时明确报告限制，不擅自提交。
@@ -118,18 +122,16 @@ python3 $TM integrate 001 --commit <SHA>
 主 Agent 按项目需求提出尽量少的角色，用户从自己配置的模型（`~/.factory/settings.json` 里的 BYOK 模型）中为每个角色选一个。每个角色对应一个项目级 droid，模型固定在 droid 文件里，主 Agent 不能更改。
 
 ```bash
-TM=~/.factory/skills/foreman/tools/cli.py
-
-python3 $TM models                       # 列出可选模型（不含密钥）
-python3 $TM models --search "claude"      # 搜索，仍显示全量目录总数
-python3 $TM models --recommend "custom:<模型ID>"  # 只排序，不隐藏其他线路
-python3 $TM team set backend \
+foreman models                       # 列出可选模型（不含密钥）
+foreman models --search "claude"      # 搜索，仍显示全量目录总数
+foreman models --recommend "custom:<模型ID>"  # 只排序，不隐藏其他线路
+foreman team set backend \
   --model "custom:<模型ID>" \
   --description "接口、数据库和业务逻辑"   # 生成 .factory/droids/tm-backend.md
-python3 $TM team show                    # 查看角色和模型
-python3 $TM team check                   # 派发前检查模型服务能否连通
-python3 $TM team audit                   # 核对子 Agent 实际用的模型
-python3 $TM team remove backend          # 删除角色
+foreman team show                    # 查看角色和模型
+foreman team check                   # 派发前检查模型服务能否连通
+foreman team audit                   # 核对子 Agent 实际用的模型
+foreman team remove backend          # 删除角色
 ```
 
 任务写上 `role` 和 `files`：
@@ -143,9 +145,9 @@ python3 $TM team remove backend          # 删除角色
 ### 并行派发
 
 ```bash
-python3 $TM batch --json      # 下一批可同时开始的任务，含 Task 调用参数 task_args
-python3 $TM execution retry <execution_id> --reason "文件检查与续做范围"
-python3 $TM integrate 002 --commit <SHA>     # 确认提交已集成，标记 DONE 并解锁后续任务
+foreman batch --json      # 下一批可同时开始的任务，含 Task 调用参数 task_args
+foreman execution retry <execution_id> --reason "文件检查与续做范围"
+foreman integrate 002 --commit <SHA>     # 确认提交已集成，标记 DONE 并解锁后续任务
 ```
 
 一批任务要满足：依赖已集成、角色已配置、修改的文件互不重叠，也不和未集成的任务重叠。默认每批最多 2 个，可用 `config set parallel.max_parallel=3` 调整。
@@ -184,78 +186,78 @@ python3 $TM integrate 002 --commit <SHA>     # 确认提交已集成，标记 DO
 
 ```bash
 # 查看配置
-python tools/cli.py config show
+foreman config show
 
 # 设置 droid 映射
-python tools/cli.py config set execution.medium=code-architect
+foreman config set execution.medium=code-architect
 
 # 查看执行计划
-python tools/cli.py plan-execution 001
-python tools/cli.py plan-execution 001 --json
+foreman plan-execution 001
+foreman plan-execution 001 --json
 ```
 
 ## CLI 命令
 
 ```bash
 # 初始化
-python tools/cli.py init
+foreman init
 
 # 写入和查看任务
-python tools/cli.py add --file planning/plan.json [--replace]
-python tools/cli.py show                 # 任务板
-python tools/cli.py show 001             # 单个任务的完整上下文、当前状态和下一步命令
-python tools/cli.py show --mermaid       # 依赖图
+foreman add --file planning/plan.json [--replace]
+foreman show                 # 任务板
+foreman show 001             # 单个任务的完整上下文、当前状态和下一步命令
+foreman show --mermaid       # 依赖图
 
 # 下一个可以开始的任务（batch 的第一项）
-python tools/cli.py select
+foreman select
 
 # 任务统计
-python tools/cli.py status
+foreman status
 
 # 规划检查（缺字段、依赖不存在或成环、角色未配置；有问题时退出码 1）
-python tools/cli.py validate
+foreman validate
 
 # 规划执行
-python tools/cli.py plan-execution 001
+foreman plan-execution 001
 
 # 更新状态（只用于从未 begin 过的旧任务）
-python tools/cli.py update 001 IN_PROGRESS
+foreman update 001 IN_PROGRESS
 
 # 当前会话直接执行（任务没写 role）
-python tools/cli.py execution begin 001
-python tools/cli.py execution finish 001 --outcome completed   # 任务 ID 或 execution_id 都可以
+foreman execution begin 001
+foreman execution finish 001 --outcome completed   # 任务 ID 或 execution_id 都可以
 
 # Checkpoint 管理
-python tools/cli.py checkpoint check
-python tools/cli.py checkpoint save --phase developing --data current_task=001
+foreman checkpoint check
+foreman checkpoint save --phase developing --data current_task=001
 
 # 查看历史
-python tools/cli.py history
-python tools/cli.py history --task-id 001
+foreman history
+foreman history --task-id 001
 
 # 列出验收条件；--template 生成验收证据框架 planning/acceptance-001.json
-python tools/cli.py acceptance 001
-python tools/cli.py acceptance 001 --template
+foreman acceptance 001
+foreman acceptance 001 --template
 
 # 固定模型团队和并行派发
-python tools/cli.py models
-python tools/cli.py team set|show|remove|check|audit
-python tools/cli.py batch --json
-python tools/cli.py fail 001 --reason "..."
-python tools/cli.py integrate 001 --commit <SHA>
+foreman models
+foreman team set|show|remove|check|audit
+foreman batch --json
+foreman fail 001 --reason "..."
+foreman integrate 001 --commit <SHA>
 
 # 受管执行与恢复
-python tools/cli.py preflight --dispatcher "custom:<用户选定ID>"
-python tools/cli.py run 001 --dispatcher "custom:<用户选定ID>"
-python tools/cli.py execution recover
-python tools/cli.py execution inspect <execution_id>
-python tools/cli.py execution finish <execution_id> --outcome interrupted
-python tools/cli.py execution audit <execution_id>
-python tools/cli.py execution accept <execution_id> --evidence-file planning/acceptance-001.json
-python tools/cli.py execution retry <execution_id> --reason "保留部分成果，继续剩余工作"
-python tools/cli.py execution unblock <execution_id> --reason "用户已处理阻塞原因"
-python tools/cli.py execution sync
-python tools/cli.py delivery --commit HEAD --paths <运行依赖路径...>
+foreman preflight --dispatcher "custom:<用户选定ID>"
+foreman run 001 --dispatcher "custom:<用户选定ID>"
+foreman execution recover
+foreman execution inspect <execution_id>
+foreman execution finish <execution_id> --outcome interrupted
+foreman execution audit <execution_id>
+foreman execution accept <execution_id> --evidence-file planning/acceptance-001.json
+foreman execution retry <execution_id> --reason "保留部分成果，继续剩余工作"
+foreman execution unblock <execution_id> --reason "用户已处理阻塞原因"
+foreman execution sync
+foreman delivery --commit HEAD --paths <运行依赖路径...>
 ```
 
 ## 测试
@@ -279,7 +281,7 @@ python3 -m pytest tests/test_foreman.py tests/test_foreman_team.py tests/test_fo
 技能从 `task-management` 改名为 `foreman`，只换了技能名和安装目录。项目里的 `.task-management/` 目录、角色 droid 的 `tm-` 前缀和文件里的 `managed-by: task-management` 标记、执行标记 `[tm:编号]` 都保持原样，已有任务板、角色和执行记录可以直接继续用。
 
 ```bash
-python install.py --profile foreman
+python3 install.py --profile foreman
 rm -rf ~/.factory/skills/task-management   # 删除改名前的安装，避免出现两个相同的技能
 ```
 
@@ -287,7 +289,7 @@ rm -rf ~/.factory/skills/task-management   # 删除改名前的安装，避免�
 
 `dual-ai-planning` 已并入本技能。数据文件同样是 `planning/tasks.json`，已有任务板可以直接读取；视图从 `planning/codex-tasks.md` 换成 `planning/tasks.md`。
 
-| 原来的命令（`planning.py ...`） | 现在（`tools/cli.py ...`） |
+| 原来的命令（`planning.py ...`） | 现在（`foreman ...`） |
 |---|---|
 | `select`、`board show` | `select`、`show` |
 | `board context 001` | `show 001` |
@@ -311,7 +313,7 @@ rm -rf ~/.factory/skills/task-management   # 删除改名前的安装，避免�
 
 1. 安装新技能：
 ```bash
-python install.py --profile foreman
+python3 install.py --profile foreman
 ```
 
 2. 任务板：
@@ -336,7 +338,7 @@ python install.py --profile foreman
 仓库根目录的 `web_server.py` 用于可视化监控（不随技能安装，需要在仓库里运行）：
 
 ```bash
-python web_server.py 5001
+python3 web_server.py 5001
 open http://localhost:5001
 ```
 
@@ -355,7 +357,7 @@ open http://localhost:5001
 
 ### 任务板不存在
 ```bash
-python tools/cli.py init
+foreman init
 ```
 
 ### 在子目录里运行时找不到任务板
@@ -364,19 +366,19 @@ python tools/cli.py init
 ### 角色的 droid 不存在
 角色的 droid 在项目的 `.factory/droids/tm-<角色>.md`，由 `team set` 生成：
 ```bash
-python tools/cli.py team show     # 已配置的角色和模型
-python tools/cli.py team check    # 检查 droid 文件和模型服务
+foreman team show     # 已配置的角色和模型
+foreman team check    # 检查 droid 文件和模型服务
 ```
 `plan-execution` 用到的通用 droid（如 `worker`）由 Droid 自带，或放在 `~/.factory/droids/`。
 
 ### 配置丢失
 重新生成默认配置：
 ```bash
-python tools/cli.py init
+foreman init
 ```
 
 ### 依赖循环
-`add` 不检查依赖。运行 `python tools/cli.py validate` 列出依赖环、不存在的依赖和缺失的字段；batch 无可执行任务时检查 skipped，不把依赖阻塞当作全部完成。
+`add` 不检查依赖。运行 `foreman validate` 列出依赖环、不存在的依赖和缺失的字段；batch 无可执行任务时检查 skipped，不把依赖阻塞当作全部完成。
 
 ## 架构
 
@@ -398,8 +400,10 @@ foreman/
 │   ├── safety.py        # 单次运行的原生沙箱配置
 │   ├── probe.py         # 无敏感数据的隔离探针
 │   └── checkpoint.py    # Checkpoint 管理
+├── bin/
+│   └── foreman          # 命令入口，运行 tools/cli.py
 ├── tools/
-│   ├── cli.py           # CLI 工具
+│   ├── cli.py           # CLI 实现
 │   └── dispatch_guard.py # 工具 schema 和文件路径检查
 └── references/
     └── managed-workflow.md # 证据格式、恢复步骤与保护边界
