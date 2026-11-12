@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>项目概览 - Task Management</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/team.css">
+    <link rel="stylesheet" href="/static/css/overview.css">
+</head>
+<body>
+    <main class="container">
+        {% include "project_bar.html" %}
+        <header>
+            <div class="masthead">
+                <a href="/" class="brand">Task Management</a>
+                <span class="edition">项目概览</span>
+            </div>
+            <div class="page-heading">
+                <div>
+                    <p class="eyebrow">项目概览</p>
+                    <h1>进度与规划</h1>
+                    <p class="subtitle">做到哪了，接下来做什么，当初是怎么定的。</p>
+                </div>
+                <span class="page-note">只读视图。</span>
+            </div>
+        </header>
+
+        <nav class="filters overview-nav" aria-label="页内导航">
+            <a class="filter-btn" href="#progress">进度</a>
+            <a class="filter-btn" href="#next">下一批</a>
+            <a class="filter-btn" href="#graph">依赖图</a>
+            <a class="filter-btn" href="#history">执行记录</a>
+            <a class="filter-btn" href="#specs">规划文档</a>
+        </nav>
+
+        <section class="team-section" id="progress">
+            <h2 class="section-title">进度</h2>
+            <div id="progressPanel" class="panel-content"><div class="loading">加载进度中…</div></div>
+        </section>
+
+        <section class="team-section" id="next">
+            <h2 class="section-title">下一批</h2>
+            <p class="batch-notice">此预览仅显示计划，不会实际执行任务。</p>
+            <div id="batchPanel" class="panel-content"><div class="loading">加载批次预览中…</div></div>
+        </section>
+
+        <section class="team-section" id="graph">
+            <h2 class="section-title">依赖图</h2>
+            <div id="graphPanel" class="panel-content"><div class="loading">加载依赖图中…</div></div>
+        </section>
+
+        <section class="team-section" id="history">
+            <h2 class="section-title">最近执行记录</h2>
+            <div id="historyPanel" class="panel-content"><div class="loading">加载执行记录中…</div></div>
+        </section>
+
+        <section class="team-section" id="specs">
+            <h2 class="section-title">规划文档</h2>
+            <div id="specsPanel" class="panel-content"><div class="loading">加载规划文档中…</div></div>
+        </section>
+
+        <footer class="sheet-footer">
+            <span>项目概览 · 只读视图</span>
+            <span>每5秒自动同步</span>
+        </footer>
+    </main>
+
+    <script src="/static/js/markdown.js"></script>
+    <script src="/static/js/batch.js"></script>
+    <script src="/static/js/overview.js"></script>
+</body>
+</html>

@@ -9,6 +9,7 @@
         <span class="project-path" title="{{ project.path }}">{{ project.path }}</span>
     </div>
     <div class="project-nav">
+        <a href="{{ url_for('overview', project_id=project.id) }}" class="nav-link">概览</a>
         <a href="{{ url_for('index', project_id=project.id) }}" class="nav-link">任务</a>
         <a href="{{ url_for('team', project_id=project.id) }}" class="nav-link">团队</a>
     </div>

@@ -32,7 +32,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const { roles, parallel } = data;
             
             if (!roles || Object.keys(roles).length === 0) {
-                rolesPanel.innerHTML = '<div class="empty-state">未配置任何角色。请通过任务管理技能选择模型并配置团队。</div>';
+                rolesPanel.innerHTML = '<div class="empty-state">未配置任何角色。请通过 foreman 技能选择模型并配置团队。</div>';
                 return;
             }
 
@@ -189,55 +189,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            const { batch, skipped } = data;
-            
-            if ((!batch || batch.length === 0) && (!skipped || skipped.length === 0)) {
-                batchPanel.innerHTML = '<div class="empty-state">当前没有可执行的任务。所有任务可能已完成、被阻塞或依赖未满足。</div>';
-                return;
-            }
-
-            let html = '';
-            
-            if (batch && batch.length > 0) {
-                html += '<div class="batch-list"><h3 class="batch-subtitle">计划执行任务</h3>';
-                for (const task of batch) {
-                    const files = task.files && task.files.length > 0
-                        ? `<span class="batch-files">${task.files.length} 个文件</span>`
-                        : '';
-                    
-                    html += `
-                        <div class="batch-item">
-                            <div class="batch-header">
-                                <span class="batch-task-id">${escapeHtml(task.task_id)}</span>
-                                <span class="batch-title">${escapeHtml(task.task_title)}</span>
-                            </div>
-                            <div class="batch-details">
-                                <span>角色: ${escapeHtml(task.role)}</span>
-                                <span>Droid: ${escapeHtml(task.droid || '未配置')}</span>
-                                <span>模型: ${escapeHtml(task.model || '未配置')}</span>
-                                <span>复杂度: ${escapeHtml(task.complexity || '未知')}</span>
-                                ${files}
-                            </div>
-                        </div>
-                    `;
-                }
-                html += '</div>';
-            }
-            
-            if (skipped && skipped.length > 0) {
-                html += '<div class="skipped-list"><h3 class="batch-subtitle">跳过任务</h3>';
-                for (const item of skipped) {
-                    html += `
-                        <div class="skipped-item">
-                            <span class="skipped-id">${escapeHtml(item.id)}</span>
-                            <span class="skipped-reason">${escapeHtml(item.reason)}</span>
-                        </div>
-                    `;
-                }
-                html += '</div>';
-            }
-            
-            batchPanel.innerHTML = html;
+            batchPanel.innerHTML = renderBatchPreview(data);
         } catch (error) {
             if (version !== versions.batch) return;
             batchPanel.innerHTML = `<div class="error">网络错误：${escapeHtml(error.message)}</div>`;

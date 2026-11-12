@@ -1,21 +1,24 @@
 #!/usr/bin/env python3
 """Local Task Management monitor. Run python web_server.py [port]."""
 import json
+import re
 import sys
 import threading
 from collections import Counter
-from pathlib import Path
+from datetime import datetime, timezone
+from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
 from flask import Flask, abort, jsonify, render_template, request
 from werkzeug.exceptions import HTTPException
 
 REPO_ROOT = Path(__file__).resolve().parent
-sys.path.insert(0, str(REPO_ROOT / 'task-management'))
+sys.path.insert(0, str(REPO_ROOT / 'foreman'))
 from lib.board import TaskBoard  # noqa: E402
 from lib.config import ExecutionConfig  # noqa: E402
 from lib.executor import TaskExecutor  # noqa: E402
 from lib.store import (  # noqa: E402
+    ManagedTaskError,
     dependency_ids,
     dependency_satisfied,
     find_task,
@@ -30,6 +33,10 @@ EDITABLE_STATUSES = frozenset({
     'AWAITING_INTEGRATION', 'REJECTED', 'BLOCKED', 'FAILED',
 })
 VALID_STATUSES = EDITABLE_STATUSES | {'DONE', 'VERIFIED'}
+SPEC_DIR = 'planning/specs'
+SPEC_NAME = re.compile(r'[^./\\\x00][^/\\\x00]*\.md')
+SPEC_TITLE = re.compile(r'\s{0,3}#\s+(.+?)\s*$')
+SPEC_MAX_BYTES = 1024 * 1024
 
 
 def create_app(repo_root=None, registry_file=None):
@@ -98,6 +105,50 @@ def create_app(repo_root=None, registry_file=None):
                     board={key: value for key, value in row_for(task, tasks).items()
                            if key in ('integration', 'waiting')})
 
+    def checkpoint_view(project):
+        path = project.path('.task-management/checkpoint.json')
+        if not path.exists():
+            return None
+        loaded = json.loads(path.read_text(encoding='utf-8'))
+        data = loaded.get('data', {}) if isinstance(loaded, dict) else None
+        if not isinstance(data, dict):
+            raise ValueError('Invalid checkpoint')
+
+        def text(value):
+            return value if isinstance(value, str) else None
+
+        def count(value):
+            return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+        spec = PurePosixPath(text(data.get('spec_file')) or '')
+        # Notes and other free-form fields can hold anything; only the cursor fields are shown.
+        return dict(phase=text(loaded.get('phase')), timestamp=text(loaded.get('timestamp')),
+                    current_task=text(data.get('current_task')),
+                    completed_tasks=count(data.get('completed_tasks')),
+                    total_tasks=count(data.get('total_tasks')),
+                    spec=spec.name if spec.parent == PurePosixPath(SPEC_DIR) and SPEC_NAME.fullmatch(spec.name) else None)
+
+    def spec_files(project):
+        directory = project.path(SPEC_DIR)
+        if not directory.is_dir():
+            return []
+        # A link inside specs/ must not expose another file, even one inside the project.
+        return [path for path in directory.glob('*.md')
+                if SPEC_NAME.fullmatch(path.name) and project.path(path) == path and path.is_file()]
+
+    def spec_file(project, name):
+        path = project.path(SPEC_DIR) / name
+        if not SPEC_NAME.fullmatch(name) or project.path(path) != path or not path.is_file():
+            abort(404, description='Spec not found')
+        return path
+
+    def spec_summary(path):
+        with path.open('rb') as handle:
+            head = handle.read(8192).decode('utf-8', errors='replace')
+        title = next((match.group(1) for match in map(SPEC_TITLE.match, head.splitlines()) if match), path.stem)
+        stat = path.stat()
+        return dict(name=path.name, title=title, size=stat.st_size,
+                    modified=datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat())
     def lookup(doc, task_id):
         task = find_task(doc, task_id)
         if task is None:
@@ -158,7 +209,7 @@ def create_app(repo_root=None, registry_file=None):
             abort(400, description='Expected a JSON object')
         status = data.get('status')
         if isinstance(status, str) and status in ('DONE', 'VERIFIED'):
-            abort(400, description='请通过 task-management 技能 integrate 确认集成并完成任务')
+            abort(400, description='请通过 foreman 技能 integrate 确认集成并完成任务')
         if not isinstance(status, str) or status not in EDITABLE_STATUSES:
             abort(400, description='Invalid or missing status field')
         if 'reset_retries' in data and not isinstance(data['reset_retries'], bool):
@@ -166,7 +217,11 @@ def create_app(repo_root=None, registry_file=None):
         with update_lock:
             lookup(document(project), task_id)
             board = TaskBoard.load(project.root)
-            board.update_task_status(task_id, status, reset_retries=data.get('reset_retries', False))
+            try:
+                board.update_task_status(task_id, status, reset_retries=data.get('reset_retries', False),
+                                         require_unmanaged=True)
+            except ManagedTaskError:
+                abort(409, description='该任务由受管派发维护状态，请在 foreman 技能中用 execution 或 integrate 命令处理')
         return jsonify(success=True, message=f'任务 {task_id} 状态已更新为 {status}')
 
     @app.get('/api/board')
@@ -243,6 +298,42 @@ def create_app(repo_root=None, registry_file=None):
             for entry in plan['batch']
         ], skipped=[{key: entry[key] for key in ('id', 'reason')} for entry in plan['skipped']])
 
+    @app.get('/api/checkpoint')
+    @app.get('/api/projects/<project_id>/checkpoint')
+    def get_checkpoint(project_id='default'):
+        return jsonify(success=True, checkpoint=checkpoint_view(checked_project(project_id)))
+
+    @app.get('/api/graph')
+    @app.get('/api/projects/<project_id>/graph')
+    def get_graph(project_id='default'):
+        doc = document(checked_project(project_id))
+        nodes = [dict(row_for(task, doc['tasks']), role=task.get('role')) for task in doc['tasks']]
+        edges, missing = [], []
+        for task in doc['tasks']:
+            for dep in dict.fromkeys(str(dep) for dep in dependency_ids(task.get('dependencies'))):
+                source = find_task(doc, dep)
+                if source is None:
+                    missing.append({'task': task['id'], 'dependency': dep})
+                elif source is not task and {'from': source['id'], 'to': task['id']} not in edges:
+                    edges.append({'from': source['id'], 'to': task['id']})
+        return jsonify(success=True, nodes=nodes, edges=edges, missing=missing)
+
+    @app.get('/api/specs')
+    @app.get('/api/projects/<project_id>/specs')
+    def get_specs(project_id='default'):
+        specs = [spec_summary(path) for path in spec_files(checked_project(project_id))]
+        specs.sort(key=lambda spec: (spec['modified'], spec['name']), reverse=True)
+        return jsonify(success=True, specs=specs)
+
+    @app.get('/api/specs/<name>')
+    @app.get('/api/projects/<project_id>/specs/<name>')
+    def get_spec(name, project_id='default'):
+        path = spec_file(checked_project(project_id), name)
+        with path.open('rb') as handle:
+            raw = handle.read(SPEC_MAX_BYTES + 1)
+        return jsonify(success=True, spec=dict(
+            spec_summary(path), content=raw[:SPEC_MAX_BYTES].decode('utf-8', errors='replace'),
+            truncated=len(raw) > SPEC_MAX_BYTES))
     @app.get('/')
     @app.get('/project/<project_id>/tasks')
     def index(project_id='default'):
@@ -260,6 +351,10 @@ def create_app(repo_root=None, registry_file=None):
     def team(project_id='default'):
         return render_template('team.html', **page_context(checked_project(project_id)))
 
+    @app.get('/overview')
+    @app.get('/project/<project_id>/overview')
+    def overview(project_id='default'):
+        return render_template('overview.html', **page_context(checked_project(project_id)))
     return app
 
 

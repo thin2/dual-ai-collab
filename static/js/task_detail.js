@@ -1,4 +1,4 @@
-// Render task content as text, including titles, paths and diagnostic messages.
+// Render titles, paths and diagnostic messages as text. Description and section bodies go through renderMarkdown.
 function escapeHtml(value) {
     return String(value ?? '').replace(/[&<>"']/g, char => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[char]));
 }
@@ -83,7 +83,7 @@ function renderTaskDetail() {
         .map(s => `
             <div class="detail-section">
                 <h3 class="section-title">${escapeHtml(s.heading)}</h3>
-                <div class="description">${escapeHtml(s.body)}</div>
+                <div class="description">${renderMarkdown(s.body)}</div>
             </div>
         `).join('');
     
@@ -92,7 +92,7 @@ function renderTaskDetail() {
     const acceptanceSection = acceptanceCriteria ? `
         <div class="detail-section">
             <h3 class="section-title">验收标准</h3>
-            <div class="description">${escapeHtml(acceptanceCriteria)}</div>
+            <div class="description">${renderMarkdown(acceptanceCriteria)}</div>
         </div>
     ` : '';
     
@@ -164,7 +164,7 @@ function renderTaskDetail() {
 
         <div class="detail-section">
             <h3 class="section-title">任务描述</h3>
-            <div class="description">${escapeHtml(description)}</div>
+            <div class="description">${renderMarkdown(description)}</div>
         </div>
 
         ${otherSections}
@@ -184,15 +184,15 @@ function renderTaskDetail() {
                 </div>
                 <div class="meta-item">
                     <div class="meta-label">角色</div>
-                    <div class="meta-value">${escapeHtml(taskData.role || '未分配')}</div>
+                    <div class="meta-value">${escapeHtml(taskData.role || '当前会话直接执行')}</div>
                 </div>
                 <div class="meta-item">
                     <div class="meta-label">模型</div>
-                    <div class="meta-value">${escapeHtml(taskData.model || '未配置')}</div>
+                    <div class="meta-value">${escapeHtml(taskData.model || (taskData.role ? '未配置' : '不适用'))}</div>
                 </div>
                 <div class="meta-item">
                     <div class="meta-label">Droid</div>
-                    <div class="meta-value">${escapeHtml(taskData.droid || '未配置')}</div>
+                    <div class="meta-value">${escapeHtml(taskData.droid || (taskData.role ? '未配置' : '不适用'))}</div>
                 </div>
                 <div class="meta-item">
                     <div class="meta-label">依赖</div>

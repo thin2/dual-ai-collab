@@ -1,5 +1,6 @@
 """HTTP contracts and persistence integration for the Task Management monitor."""
 import json
+import os
 import sys
 from pathlib import Path
 from unittest.mock import Mock
@@ -62,6 +63,18 @@ def test_read_and_update(client):
     task_file = Path(client.application.config['TASK_FILE'])
     assert json.loads(task_file.read_text())['tasks'][0]['status'] == 'IN_PROGRESS'
     assert 'IN_PROGRESS' in task_file.with_suffix('.md').read_text()
+
+
+def test_managed_task_status_is_not_editable(client):
+    task_file = Path(client.application.config['TASK_FILE'])
+    document = json.loads(task_file.read_text())
+    document['tasks'][0].update(status='IN_PROGRESS', execution_id='001-20260101-000000-abcdef123456')
+    task_file.write_text(json.dumps(document))
+    response = client.put('/api/tasks/001', json={'status': 'PENDING', 'reset_retries': True})
+    assert response.status_code == 409 and response.json['success'] is False
+    assert 'execution' in response.json['error']
+    task = client.get('/api/tasks/001').json['task']
+    assert task['status'] == 'IN_PROGRESS' and task['failed_attempts'] == 3
 
 
 @pytest.mark.parametrize('status', sorted(web_server.EDITABLE_STATUSES))
@@ -295,3 +308,166 @@ def test_team_routes_pass_template_context_without_requiring_template(client, mo
         assert context['project']['id'] == 'default'
         assert set(context['project']) == {'id', 'name', 'path', 'available'}
         assert context['projects'] == [context['project']]
+
+
+def project_root(client):
+    return Path(client.application.config['TASK_FILE']).parents[1]
+
+
+def test_checkpoint_shows_only_cursor_fields(client):
+    root = project_root(client)
+    assert client.get('/api/checkpoint').json == {'success': True, 'checkpoint': None}
+    assert not (root / '.task-management').exists()
+    path = root / '.task-management/checkpoint.json'
+    path.parent.mkdir()
+    path.write_text(json.dumps({
+        'phase': 'developing', 'timestamp': '2026-11-10T13:58:14+00:00', 'private_extra': 'hidden',
+        'data': {'current_task': '002', 'completed_tasks': 1, 'total_tasks': True, 'note': 'private-note',
+                 'spec_file': 'planning/specs/20261110-web.md', 'task_file': 'planning/tasks.md'},
+    }))
+    response = client.get('/api/projects/default/checkpoint')
+    assert response.json == {'success': True, 'checkpoint': {
+        'phase': 'developing', 'timestamp': '2026-11-10T13:58:14+00:00', 'current_task': '002',
+        'completed_tasks': 1, 'total_tasks': None, 'spec': '20261110-web.md',
+    }}
+    assert 'private' not in response.get_data(as_text=True)
+    path.write_text(json.dumps({'phase': 7}))
+    assert client.get('/api/checkpoint').json['checkpoint'] == {
+        'phase': None, 'timestamp': None, 'current_task': None,
+        'completed_tasks': None, 'total_tasks': None, 'spec': None,
+    }
+
+
+@pytest.mark.parametrize('spec_file', [
+    '../secret.md', 'planning/other/a.md', 'planning/specs/../a.md', '/tmp/planning/specs/a.md',
+    'planning/specs/.hidden.md', 'planning/specs/a.txt', 'planning/specs/sub/a.md', 'a.md', 7,
+])
+def test_checkpoint_names_a_spec_only_inside_the_spec_folder(client, spec_file):
+    path = project_root(client) / '.task-management/checkpoint.json'
+    path.parent.mkdir()
+    path.write_text(json.dumps({'phase': 'planning', 'data': {'spec_file': spec_file}}))
+    assert client.get('/api/checkpoint').json['checkpoint']['spec'] is None
+
+
+@pytest.mark.parametrize('contents', ['{', '[]', '{"data": []}', 'private-exception-detail'])
+def test_broken_checkpoint_is_visible(client, contents, caplog):
+    path = project_root(client) / '.task-management/checkpoint.json'
+    path.parent.mkdir()
+    path.write_text(contents)
+    response = client.get('/api/checkpoint')
+    assert response.status_code == 500
+    assert response.json == {'success': False, 'error': 'Internal server error'}
+    assert 'private-exception-detail' not in caplog.text
+
+
+def test_graph_resolves_dependencies_and_reports_missing_ones(client):
+    path = Path(client.application.config['TASK_FILE'])
+    doc = json.loads(path.read_text())
+    doc['tasks'].extend([
+        {'id': '003', 'title': 'Integrated', 'status': 'DONE', 'integration': {'commit': 'abc'}},
+        {'id': '004', 'status': 'PENDING', 'dependencies': '#002, #3, #003, #missing, #004'},
+    ])
+    path.write_text(json.dumps(doc))
+    before = path.read_text()
+    result = client.get('/api/graph').json
+    assert result['success'] is True
+    assert [node['id'] for node in result['nodes']] == ['001', '002', '003', '004']
+    assert result['nodes'][0] == {'id': '001', 'title': '测试任务', 'status': 'OPEN',
+                                  'integration': 'pending', 'waiting': [], 'role': 'backend'}
+    assert result['nodes'][2]['integration'] == 'confirmed' and result['nodes'][2]['role'] is None
+    assert result['edges'] == [{'from': '001', 'to': '002'}, {'from': '002', 'to': '004'},
+                               {'from': '003', 'to': '004'}]
+    assert result['missing'] == [{'task': '004', 'dependency': 'missing'}]
+    assert path.read_text() == before
+    path.write_text('{"tasks": []}')
+    assert client.get('/api/graph').json == {'success': True, 'nodes': [], 'edges': [], 'missing': []}
+
+
+def test_specs_are_listed_newest_first_and_read_without_creating_anything(client):
+    root = project_root(client)
+    assert client.get('/api/specs').json == {'success': True, 'specs': []}
+    assert client.get('/api/specs/a.md').status_code == 404
+    assert not (root / 'planning/specs').exists()
+    specs = root / 'planning/specs'
+    specs.mkdir()
+    (specs / '20261001-old.md').write_text('前言\n\n# 旧规格 \n\n## 范围\n', encoding='utf-8')
+    (specs / '20261102-new.md').write_text('没有标题', encoding='utf-8')
+    (specs / '.hidden.md').write_text('# hidden')
+    (specs / 'notes.txt').write_text('# text')
+    (specs / 'folder.md').mkdir()
+    (specs / 'nested').mkdir()
+    (specs / 'nested/deep.md').write_text('# deep')
+    os.utime(specs / '20261001-old.md', (1_800_000_000, 1_800_000_000))
+    os.utime(specs / '20261102-new.md', (1_800_000_600, 1_800_000_600))
+    listed = client.get('/api/specs').json['specs']
+    assert listed == [
+        {'name': '20261102-new.md', 'title': '20261102-new', 'size': 12, 'modified': '2027-01-15T08:10:00+00:00'},
+        {'name': '20261001-old.md', 'title': '旧规格', 'size': 32, 'modified': '2027-01-15T08:00:00+00:00'},
+    ]
+    response = client.get('/api/projects/default/specs/20261001-old.md')
+    assert response.json == {'success': True, 'spec': dict(
+        listed[1], content='前言\n\n# 旧规格 \n\n## 范围\n', truncated=False)}
+    for name in ['.hidden.md', 'notes.txt', 'folder.md', 'nested', 'missing.md', '..', 'nested%2Fdeep.md',
+                 '..%2Ftasks.md', '%2e%2e%2ftasks.md', '..%5Ctasks.md']:
+        response = client.get('/api/specs/' + name)
+        assert response.status_code == 404, name
+        assert response.json['success'] is False
+
+
+def test_long_or_badly_encoded_spec_is_still_readable(client, monkeypatch):
+    specs = project_root(client) / 'planning/specs'
+    specs.mkdir()
+    (specs / 'long.md').write_bytes(b'# T\n' + b'x' * 20)
+    (specs / 'binary.md').write_bytes(b'# \xff\xfe title\nbody \xff')
+    monkeypatch.setattr(web_server, 'SPEC_MAX_BYTES', 10)
+    spec = client.get('/api/specs/long.md').json['spec']
+    assert spec['content'] == '# T\nxxxxxx' and spec['truncated'] is True and spec['size'] == 24
+    spec = client.get('/api/specs/binary.md').json['spec']
+    assert spec['content'].startswith('# \ufffd\ufffd') and spec['title'] == '\ufffd\ufffd title'
+
+
+def test_spec_links_cannot_expose_other_files(client, tmp_path_factory):
+    root = project_root(client)
+    specs = root / 'planning/specs'
+    specs.mkdir()
+    (specs / 'real.md').write_text('# real')
+    (root / 'private.md').write_text('private-inside-project')
+    (specs / 'inside.md').symlink_to(root / 'private.md')
+    (specs / 'alias.md').symlink_to(specs / 'real.md')
+    assert [spec['name'] for spec in client.get('/api/specs').json['specs']] == ['real.md']
+    for name in ['inside.md', 'alias.md']:
+        response = client.get('/api/specs/' + name)
+        assert response.status_code == 404
+        assert 'private' not in response.get_data(as_text=True)
+    outside = tmp_path_factory.mktemp('outside') / 'secret.md'
+    outside.write_text('private-outside-project')
+    (specs / 'outside.md').symlink_to(outside)
+    for url in ['/api/specs', '/api/specs/outside.md']:
+        response = client.get(url)
+        assert response.status_code == 409, url
+        assert response.json['success'] is False
+        assert 'private' not in response.get_data(as_text=True)
+    assert client.get('/api/specs/real.md').json['spec']['content'] == '# real'
+
+
+def test_spec_folder_link_out_of_the_project_is_rejected(client, tmp_path_factory):
+    outside = tmp_path_factory.mktemp('outside-specs')
+    (outside / 'secret.md').write_text('private-outside-project')
+    (project_root(client) / 'planning/specs').symlink_to(outside, target_is_directory=True)
+    for url in ['/api/specs', '/api/specs/secret.md']:
+        response = client.get(url)
+        assert response.status_code == 409
+        assert 'private' not in response.get_data(as_text=True)
+
+
+def test_overview_page_renders_with_project_context(client):
+    for url in ['/overview', '/project/default/overview']:
+        response = client.get(url)
+        assert response.status_code == 200
+        page = response.get_data(as_text=True)
+        for script in ['markdown.js', 'batch.js', 'overview.js']:
+            assert f'/static/js/{script}' in page
+        assert '/project/default/overview' in page
+    assert client.get('/project/unknown/overview').status_code == 404
+    assert '/static/js/batch.js' in client.get('/team').get_data(as_text=True)
+    assert '/static/js/markdown.js' in client.get('/task/001').get_data(as_text=True)

@@ -1,0 +1,70 @@
+/* Overview page: progress, dependency graph and planning documents on the paper theme. */
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+.overview-nav .filter-btn { text-decoration: none; }
+.team-section { scroll-margin-top: 16px; }
+.panel-note { color: var(--muted); font-size: 14px; margin-top: 14px; }
+
+.tone-DONE, .tone-VERIFIED { color: #52644b; }
+.tone-IN_PROGRESS { color: #516879; }
+.tone-AWAITING_REVIEW, .tone-AWAITING_INTEGRATION, .tone-BLOCKED { color: #8c672e; }
+.tone-FAILED, .tone-REJECTED { color: var(--accent); }
+.tone-OPEN, .tone-PENDING { color: #b3aa9a; }
+
+/* Progress */
+.progress-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px 48px; flex-wrap: wrap; margin-bottom: 22px; }
+.progress-figure { display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap; }
+.progress-rate { font-family: var(--serif); font-size: 64px; line-height: 1; font-variant-numeric: tabular-nums; }
+.progress-caption { color: var(--muted); font-size: 16px; }
+.progress-facts { display: flex; gap: 16px 40px; flex-wrap: wrap; }
+.progress-facts dt { color: var(--muted); font-size: 13px; margin-bottom: 4px; }
+.progress-facts dd { font-size: 17px; }
+.progress-facts a { color: var(--accent); }
+.progress-bar { display: flex; height: 14px; background: var(--paper-shade); border: 1px solid var(--line); border-radius: 2px; overflow: hidden; color: var(--muted); }
+.progress-segment { background: currentColor; min-width: 4px; }
+.progress-segment + .progress-segment { border-left: 1px solid var(--paper); }
+.status-legend { list-style: none; display: flex; flex-wrap: wrap; gap: 8px 32px; margin-top: 16px; }
+.status-legend li { display: flex; align-items: baseline; gap: 10px; }
+.status-legend .task-status { font-size: 15px; }
+.legend-count { font-family: var(--serif); font-size: 20px; font-variant-numeric: tabular-nums; }
+
+/* Dependency graph */
+.graph-scroll { overflow-x: auto; padding: 4px 2px 14px; }
+.graph-canvas { position: relative; }
+.graph-edges { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.graph-edge { fill: none; stroke: #a59c8c; stroke-width: 1.5; }
+.graph-edge.pending { stroke: var(--accent); stroke-dasharray: 5 5; }
+.graph-arrow { fill: #a59c8c; }
+.graph-arrow.pending { fill: var(--accent); }
+.graph-node { position: absolute; width: 200px; height: 92px; display: flex; flex-direction: column; gap: 6px; padding: 10px 14px; background: var(--paper); border: 1px solid var(--line); border-left: 3px solid currentColor; border-radius: 2px; color: var(--muted); text-decoration: none; overflow: hidden; transition: background-color .15s; }
+.graph-node:hover { background: var(--paper-shade); }
+.graph-node-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.graph-id { font-family: var(--serif); font-size: 15px; color: var(--muted); }
+.graph-title { color: var(--ink); font-size: 15px; line-height: 1.4; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+.graph-missing { list-style: none; margin-top: 12px; color: var(--accent); font-size: 14px; }
+
+/* Recent runs */
+.history-task { min-width: 220px; }
+.history-nowrap { white-space: nowrap; }
+/* Narrow screens scroll the table sideways instead of squeezing every column. */
+#historyPanel table { min-width: 760px; }
+.history-task a { color: inherit; text-decoration-color: var(--line); text-underline-offset: 3px; }
+
+/* Planning documents */
+.spec-layout { display: grid; grid-template-columns: 270px minmax(0, 1fr); gap: 40px; align-items: start; }
+.spec-list { display: flex; flex-direction: column; gap: 8px; position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow-y: auto; }
+.spec-item { display: flex; flex-direction: column; gap: 4px; text-align: left; background: transparent; border: 1px solid var(--line); border-left: 3px solid var(--line); border-radius: 2px; padding: 12px 14px; color: var(--ink); cursor: pointer; transition: background-color .15s; }
+.spec-item:hover { background: var(--paper-shade); }
+.spec-item.active { border-left-color: var(--accent); background: var(--paper-shade); }
+.spec-item-title { font-family: var(--serif); font-size: 17px; line-height: 1.4; overflow-wrap: anywhere; }
+.spec-item-meta { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.spec-badge { color: var(--accent); }
+.spec-document { min-width: 0; }
+.spec-document-head { display: flex; justify-content: space-between; gap: 6px 16px; flex-wrap: wrap; color: var(--muted); font-size: 13px; padding-bottom: 12px; margin-bottom: 20px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+
+@media (max-width: 700px) {
+    .progress-rate { font-size: 48px; }
+    .progress-facts { gap: 14px 28px; }
+    .spec-layout { grid-template-columns: 1fr; gap: 24px; }
+    .spec-list { position: static; max-height: none; }
+}
