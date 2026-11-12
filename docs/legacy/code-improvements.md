@@ -1,4 +1,6 @@
-# 实测改进清单与实现结果
+# 实测改进清单与实现结果（旧版）
+
+> **旧版文档，不再更新。** 本文讲的是旧版 dual-ai-collab（代码在 `skill/`），其中的命令和路径不适用于当前的 foreman 技能。当前版本的说明见 [foreman/README.md](../../foreman/README.md)。
 
 本清单来自 Web UI 开发实测，以下八项已实现。验证覆盖 CLI、模拟 app-server 协议和现有 Web API 回归；没有重新调用真实 Claude / Codex 或安装任务依赖。
 

@@ -1,10 +1,12 @@
-# Dual AI Collaboration - 使用教程
+# Dual AI Collaboration - 使用教程（旧版）
+
+> **旧版文档，不再更新。** 本文讲的是旧版 dual-ai-collab（代码在 `skill/`），其中的命令和路径不适用于当前的 foreman 技能。当前版本的说明见 [foreman/README.md](../../foreman/README.md)。
 
 双 AI 协同开发系统，支持多模型路由、智能任务调度和完整的项目管理功能。
 
 ## 当前版本说明
 
-新增可恢复的 `app-server` 后端及 `run complete --repair`，详见 [会话后端教程](./docs/session-backend.md)。
+新增可恢复的 `app-server` 后端及 `run complete --repair`，详见 [会话后端教程](./session-backend.md)。
 
 
 - 模板命令加 `--add` 才会入库；`--depends-on 001` 指定依赖。不加 `--add` 仅输出 JSON。

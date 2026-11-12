@@ -1,4 +1,6 @@
-# 任务面板与交付流程
+# 任务面板与交付流程（旧版）
+
+> **旧版文档，不再更新。** 本文讲的是旧版 dual-ai-collab（代码在 `skill/`），其中的命令和路径不适用于当前的 foreman 技能。当前版本的说明见 [foreman/README.md](../../foreman/README.md)。
 
 在项目根目录执行 `python3 /path/to/skill/scripts/cli.py`（下文简称 `<cli>`）。`planning/tasks.json` 保存任务定义，Markdown 是同步视图。`board show` 将运行记录、验收报告、审查与集成凭据聚合成只读面板。
 

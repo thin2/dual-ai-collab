@@ -1,208 +1,106 @@
 # Web UI 使用指南
 
-## 快速开始
+仓库根目录的 `web_server.py` 是 foreman 的本地监控页面：查看任务板、进度、团队配置和执行记录，也能改少数状态。它不启动子 Agent，不调用模型，也不随技能安装，需要在本仓库里运行。旧版 dual-ai-collab（`skill/`）的数据它不读取。
 
-### 1. 安装依赖
-
-```bash
-# 安装 Flask（如果还未安装）
-python3 -m pip install --user Flask
-```
-
-### 2. 启动服务
+## 启动
 
 ```bash
-cd /Users/hanning/dual-ai-collab
-python3 web_server.py 5001
+python3 -m pip install --user Flask   # 只有 Web UI 需要 Flask，技能本身只用标准库
+cd <本仓库>
+python3 web_server.py 5001            # 端口可省略，默认 5001
 ```
 
-### 3. 访问界面
+浏览器打开 http://localhost:5001 。服务只监听 `127.0.0.1`，其他机器访问不到。修改代码或升级后要重启服务再刷新页面。
 
-打开浏览器访问：http://localhost:5001
+## 项目
 
-## 多项目管理
+页面顶部选择当前项目。
 
-页面顶部选择当前项目，使用“登记项目”填写现有目录的绝对路径和项目名称。登记不会创建或搬迁项目文件；没有任务板的目录显示为空列表。
+- **默认项目**是 `web_server.py` 所在的目录，也就是本仓库。
+- **其他项目**用“登记项目”添加：填项目名称和项目根目录的绝对路径（`init` 时所在的目录）。登记不会创建、移动或初始化任何文件；没有任务板的目录显示为空列表。同一个目录不能登记两次。
+- 登记记录保存在本仓库的 `.task-management/projects.json`。要换位置，启动前设置环境变量 `TASK_MANAGEMENT_PROJECTS_FILE=/absolute/path/projects.json`。
+- 旧版用过的 `.dual-ai-collab/projects.json` 和 `DUAL_AI_PROJECTS_FILE` 不再读取，以前登记的项目要重新登记。
+- 登记过的目录被删除或移走后，选择器里显示“路径不可用”，这个项目的接口返回 409。
 
-- 项目地址：`/project/{project_id}/tasks`，详情：`/project/{project_id}/task/{task_id}`。
-- 同号任务在不同项目中相互独立，返回列表会保留当前项目。
-- 默认注册表：工具仓库的 `.dual-ai-collab/projects.json`。启动前可用 `DUAL_AI_PROJECTS_FILE=/absolute/path/projects.json` 指定其他位置。
-- 重启服务会保留登记结果；已丢失的项目目录在选择器中标记为不可用。
-- 原 `/api/tasks`、`/api/board` 和 `/task/{id}` 继续指向默认项目。
-- “已完成”统计和筛选只计入具有有效集成确认的任务，旧 DONE / VERIFIED 显示“待确认集成”。手动更新状态不等于集成确认。
+每个项目的数据都从它自己的目录读取：
 
-本版不提供网页设计追问或模型调用，不会因打开页面、登记项目或切换项目启动模型 CLI。模型执行仍沿用现有项目内 CLI 工作流。
+| 内容 | 文件 |
+| --- | --- |
+| 任务板 | `planning/tasks.json`（没有时读旧的 `planning/codex-tasks.json`） |
+| 角色和并发配置 | `.task-management/config.json`，角色的 droid 在 `.factory/droids/tm-<角色>.md` |
+| 执行记录 | `.task-management/history/*.json` |
+| 当前阶段 | `.task-management/checkpoint.json` |
+| 规划文档 | `planning/specs/*.md`（不含子目录和符号链接） |
 
-新增接口：
+打开页面和其他 GET 请求不会在项目里创建文件。
+
+## 页面
+
+每个页面的地址都有两种写法：默认项目用 `/overview`，其他项目用 `/project/<项目ID>/overview`，其余页面同理。页面每 5 秒刷新一次，标签页切到后台时暂停。
+
+- **概览**（`/overview`）：只读。完成比例和各状态数量，checkpoint 里的当前阶段，下一批可以开始的任务和跳过原因，依赖图，最近的执行记录，规划文档（按 Markdown 显示）。当前阶段只显示阶段、时间、当前任务和规格文件名，不显示备注。
+- **任务**（`/`）：任务列表和统计，可按状态筛选。“已完成”只计入有集成记录的 `DONE` 任务。
+- **任务详情**（`/task/<任务ID>`）：描述和各节正文、优先级、预估小时、角色、固定模型和 droid、依赖、失败次数、相关文件和集成记录。描述和各节正文按 Markdown 显示，内容先转义再加标签。没写角色的任务显示为“当前会话直接执行”。任务的结构化验收条件（`acceptance` 字段）页面上不显示，用 `acceptance <任务ID>` 查看。
+- **团队**（`/team`）：只读。角色和模型、手动运行的连接检查、最近子 Agent 的实际模型核对、下一批预览。连接检查只验证 droid 配置、BYOK 模型登记和模型服务的 TCP 连接，不代表鉴权或模型请求能成功。
+
+### 在页面上改状态
+
+任务详情页可以把任务改成待处理、待办、进行中、待审查、待确认集成、已拒绝、阻塞或失败。有两个限制：
+
+- 不能改成已完成。完成要在项目里运行 foreman 的 `integrate <任务ID> --commit <SHA>`，确认提交已集成。
+- 用 `execution begin` 或 `run` 开始过的任务，状态只能用 foreman 的 `execution` 和 `integrate` 命令修改，页面会拒绝（409）。
+
+## 和 CLI 一起用
+
+页面和 foreman CLI 读写同一个任务板。在项目里用 CLI 写入或推进任务，页面下一次刷新就能看到：
+
+```bash
+TM=~/.factory/skills/foreman/tools/cli.py   # 已安装的技能；在本仓库里也可以用 foreman/tools/cli.py
+cd /path/to/project
+python3 $TM add --file planning/plan.json
+python3 $TM show
+```
+
+## 接口
+
+所有接口返回 JSON，带 `success` 字段，出错时另有 `error`。默认项目用 `/api/<资源>`，其他项目用 `/api/projects/<项目ID>/<资源>`。
 
 ```text
-GET  /api/projects
-POST /api/projects                       {"name": "项目名称", "path": "/absolute/path"}
-GET  /api/projects/{id}/tasks
-GET  /api/projects/{id}/tasks/{task_id}
-PUT  /api/projects/{id}/tasks/{task_id}    {"status": "IN_PROGRESS"}
-GET  /api/projects/{id}/board
-GET  /api/projects/{id}/history
+GET  /api/projects                          项目列表
+POST /api/projects                          登记项目 {"name": "项目名称", "path": "/absolute/path"}
+GET  /api/tasks                             任务列表
+GET  /api/tasks/<任务ID>                    单个任务
+PUT  /api/tasks/<任务ID>                    改状态 {"status": "BLOCKED"}，可加 "reset_retries": true
+GET  /api/board                             各状态数量和完成比例
+GET  /api/history                           执行记录（只含任务、时间、状态、droid 和模型）
+GET  /api/team                              角色、模型和并发设置
+GET  /api/team/check                        连接检查
+GET  /api/team/audit                        子 Agent 实际模型核对
+GET  /api/batch                             下一批任务和跳过原因
+GET  /api/checkpoint                        当前阶段
+GET  /api/graph                             依赖图的节点和边
+GET  /api/specs                             规划文档列表
+GET  /api/specs/<文件名>                    规划文档内容（超过 1 MiB 时截断）
 ```
 
-本地服务保持绑定 `127.0.0.1`。更换项目根目录不会改变服务进程工作目录。升级后需要重启 Web 服务，再刷新页面。
-
-## 功能说明
-
-### 主页 - 任务列表
-
-**URL**: http://localhost:5001
-
-**功能**：
-- 📊 顶部统计面板：总任务、进行中、待审查、已完成
-- 🎯 任务筛选：按状态筛选（全部/待办/进行中/待审查/已完成）
-- 📝 任务列表：显示所有任务的基本信息
-- 🔄 自动刷新：每 5 秒自动更新任务状态
-
-**操作**：
-- 点击任务卡片 → 进入任务详情页
-- 点击筛选按钮 → 按状态过滤任务
-
-### 任务详情页
-
-**URL**: http://localhost:5001/task/{task_id}
-
-**功能**：
-- 📋 完整任务信息：描述、优先级、预计时间、依赖任务
-- ✅ 验收标准：列出所有验收条件
-- 📁 相关文件：显示任务涉及的文件
-- 🔄 状态更新：下拉选择新状态并更新
-- 🔄 自动刷新：每 5 秒自动更新
-
-**操作**：
-1. 选择新状态（下拉框）
-2. 点击"更新状态"按钮
-3. 等待更新完成（显示成功/失败消息）
-
-## API 端点
-
-### GET /api/tasks
-获取所有任务列表
-
-**响应**：
-```json
-{
-  "success": true,
-  "tasks": [...]
-}
-```
-
-### GET /api/tasks/{id}
-获取单个任务详情
-
-**响应**：
-```json
-{
-  "success": true,
-  "task": {...}
-}
-```
-
-### PUT /api/tasks/{id}
-更新任务状态
-
-**请求体**：
-```json
-{
-  "status": "IN_PROGRESS"
-}
-```
-
-**响应**：
-```json
-{
-  "success": true,
-  "message": "任务 001 状态已更新为 IN_PROGRESS"
-}
-```
-
-### GET /api/board
-获取任务板统计信息
-
-**响应**：
-```json
-{
-  "success": true,
-  "stats": {
-    "total": 5,
-    "by_status": {...},
-    "completed": 0,
-    "completion_rate": 0.0
-  }
-}
-```
-
-### GET /api/history
-获取执行历史记录
-
-**响应**：
-```json
-{
-  "success": true,
-  "history": [...]
-}
-```
-
-## 技术细节
-
-### 架构
-- **后端**：Flask 2.3+
-- **前端**：原生 HTML + CSS + JavaScript
-- **数据**：`planning/tasks.json`
-
-### 自动刷新机制
-- 页面每 5 秒自动调用 API 刷新数据
-- 页面失去焦点时停止刷新（节省资源）
-- 页面重新获得焦点时恢复刷新
-
-### 响应式设计
-- 支持桌面浏览器（Chrome/Firefox/Safari）
-- 移动端基本适配
+带 `Origin` 的修改请求必须来自同一个地址，跨站请求返回 403。数据路径经符号链接指到项目之外时拒绝读取。
 
 ## 故障排查
 
 ### 端口被占用
-如果 5001 端口被占用，使用其他端口：
-```bash
-python3 web_server.py 8080
-```
+换一个端口，例如 `python3 web_server.py 8080`。macOS 的隔空播放接收器占用 5000，所以默认用 5001。
 
 ### 任务列表为空
-检查 `planning/tasks.json` 是否存在且格式正确
+先确认顶部选的是哪个项目：默认项目是本仓库，不是你正在开发的项目。其他项目要先登记，登记的路径应是项目根目录（有 `planning/tasks.json` 的那一层）。
 
-### API 返回错误
-查看终端中的 Flask 日志输出
+### 页面显示 Internal server error
+服务不把错误细节发给页面，也不写进终端日志，避免泄露文件内容。通常是项目里某个数据文件不是合法的 JSON：
 
-### 页面不刷新
-- 检查浏览器控制台是否有 JavaScript 错误
-- 确认 API 端点正常响应
+- 任务板：在项目目录运行 `python3 $TM show`，损坏时会报出文件和位置。
+- 配置、checkpoint 和执行记录：用 `python3 -m json.tool <文件>` 逐个检查 `.task-management/config.json`、`.task-management/checkpoint.json` 和 `.task-management/history/*.json`。CLI 读到损坏的配置或 checkpoint 时会按“没有”处理，不报错。
 
-## 与 CLI 配合使用
+### 项目未登记（404）或项目目录不存在（409）
+404 表示地址里的项目 ID 不在注册表里，回到首页重新选择。409 表示登记的目录不存在或已变成符号链接；恢复目录，或者用新路径重新登记。
 
-Web UI 和 CLI 共享同一个数据文件，可以配合使用：
-
-```bash
-# CLI 创建任务
-python3 skill/scripts/cli.py templates create feature 006 --add
-
-# Web UI 中立即可见新任务（刷新后）
-
-# Web UI 更新状态后，CLI 也能看到
-python3 skill/scripts/cli.py board show
-```
-
-## 后续扩展
-
-**计划中的功能**（未实现）：
-- 任务创建和编辑
-- WebSocket 实时推送
-- 执行日志实时查看
-- 依赖关系可视化图
-- 拖拽式任务管理
-
-这些功能可以根据实际需求逐步添加。
+### 状态改不了
+改成已完成会被拒绝，要用 `integrate`。已经 `begin` 过的任务返回 409，用 `show <任务ID>` 查看下一步该运行的命令。

@@ -1,4 +1,6 @@
-# Dual AI Collaboration
+# Dual AI Collaboration（旧版）
+
+> **旧版文档，不再更新。** 本文讲的是旧版 dual-ai-collab（代码在 `skill/`），其中的命令和路径不适用于当前的 foreman 技能。仓库里的 Web UI 现在只读取 foreman 的数据，下文“Web 管理界面”一节不再适用。当前版本的说明见 [foreman/README.md](../../foreman/README.md)。
 
 双 AI 协同开发系统 - 多模型智能路由、任务管理和项目分析的完整解决方案。
 
@@ -26,21 +28,21 @@ python3 skill/scripts/cli.py run complete 001 --repair
 ```
 
 `--isolate` 需要干净的 Git 工作区。真实 Codex 0.160.1 已跑通执行、失败验收、原线程修复、再次验收；
-完整命令、权限与恢复边界见 [会话后端说明](./docs/session-backend.md)。
+完整命令、权限与恢复边界见 [会话后端说明](./session-backend.md)。
 
 ## 任务面板
 
 `python3 skill/scripts/cli.py board show` 分别显示执行、验收、审查和集成状态，并给出下一步操作。
 验收通过进入待审查；确认目标仓库集成后才解锁依赖。旧 DONE / VERIFIED 不自动算作已交付。
 使用 `board context 001` 导出上下文，或在 app-server 启动时加 `--context-task-file planning/tasks.json`，每轮自动刷新快照。
-详见 [任务面板与交付流程](./docs/task-board.md)。
+详见 [任务面板与交付流程](./task-board.md)。
 
 ## 🚀 快速开始
 
 ### 安装
 
 只需要规划与任务板、由当前会话直接开发时，不要用本页的旧版脚本：原来的 `dual-ai-planning` 轻量技能已并入
-foreman，见 [README.md](./README.md)。
+foreman，见 [仓库 README](../../README.md)。
 
 ```bash
 python3 install.py --profile foreman
@@ -71,7 +73,7 @@ open http://localhost:5001
 - 🔄 自动刷新：每 5 秒自动更新任务状态
 - 📈 执行历史：查看任务执行记录
 
-详细使用说明见：[Web UI 文档](docs/web-ui.md)
+Web UI 现在只支持 foreman，当前的说明见 [Web UI 使用指南](../web-ui.md)。
 
 ### 初始化项目
 
@@ -397,7 +399,7 @@ MIT License
 
 - [完整使用教程](./TUTORIAL.md)
 - [改进历史](./IMPROVEMENTS.md)
-- [任务板规范](./skill/references/task-board.md)
+- [任务板规范](../../skill/references/task-board.md)
 
 ## 当前实现边界
 

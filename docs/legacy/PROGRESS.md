@@ -1,4 +1,6 @@
-# 开发进度记录
+# 开发进度记录（旧版）
+
+> **旧版文档，不再更新。** 本文讲的是旧版 dual-ai-collab（代码在 `skill/`），其中的命令和路径不适用于当前的 foreman 技能。当前版本的说明见 [foreman/README.md](../../foreman/README.md)。
 
 ## 最近更新：2026-10-07
 
@@ -13,7 +15,7 @@
 - 真实 Codex 0.160.1 已验证：隔离执行 → 验收失败 → 相同线程修复 → 验收通过；验收脚本未改变，原仓库未生成产物。
 - 当前不提供交互审批界面，额外权限/输入请求会拒绝并标记 blocked；Claude SDK 和 Windows 实机验证仍待后续。
 - 验证：81 项 Python 测试、97 项 Shell 检查通过；编译与 diff 检查通过。
-- 详细设计与操作说明：docs/session-backend.md。
+- 详细设计与操作说明：[session-backend.md](./session-backend.md)。
 
 ### 第二轮集成
 

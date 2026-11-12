@@ -1,4 +1,6 @@
-# 可恢复的 Codex 会话后端
+# 可恢复的 Codex 会话后端（旧版）
+
+> **旧版文档，不再更新。** 本文讲的是旧版 dual-ai-collab（代码在 `skill/`），其中的命令和路径不适用于当前的 foreman 技能。当前版本的说明见 [foreman/README.md](../../foreman/README.md)。
 
 当前新增 `app-server` 后端，保留 `direct` 与 `adapter` 的调用方式。默认后端仍是 `direct`，可以通过基础配置或命令行选择。Claude Agent SDK 尚未接入。
 

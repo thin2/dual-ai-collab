@@ -340,7 +340,7 @@ python web_server.py 5001
 open http://localhost:5001
 ```
 
-Web UI 支持多项目管理和状态查看。
+默认显示的是该仓库目录；要看自己的项目，在页面顶部“登记项目”。页面内容、接口和故障排查见仓库的 `docs/web-ui.md`。
 
 ## 最佳实践
 

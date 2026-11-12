@@ -48,42 +48,37 @@ python3 install.py --profile full
 # 默认安装到 ~/.claude/skills/dual-ai-collab
 ```
 
-**详细文档**：[README-legacy.md](./README-legacy.md)
+**详细文档**：[docs/legacy/](./docs/legacy/README.md)。旧版的 README、教程、开发记录和设计文档都在这个目录，不再更新。
 
 旧版脚本也读写 `planning/tasks.json`，但格式和文件锁与 foreman 不兼容，同一个任务板不要两边混用。
 
 ## Web UI（Foreman）
 
-可选的任务监控界面：
+可选的本地监控界面，在本仓库里运行，需要 Flask：
 
 ```bash
 python3 web_server.py 5001
 open http://localhost:5001
 ```
 
-界面只支持新版 `foreman/lib`，提供多项目任务监控、概览页（`/overview`）和团队页（`/team`）。
-概览页只读：完成比例、当前阶段和各状态数量，下一批可开始的任务和跳过原因，任务依赖图，最近的执行记录，以及 `planning/specs/` 下的规格文档（按 Markdown 显示）。
-当前阶段来自 checkpoint，只显示阶段、时间、当前任务和规格文件名，不显示备注等自由文本。
-任务详情里的任务描述和各节正文按 Markdown 显示（标题、列表、代码、表格等），内容先转义再加标签。
-任务可查看角色、固定模型、失败次数、依赖和集成确认；没有角色的任务显示为“当前会话直接执行”。`DONE` 只有带有集成记录才计为完成。
-Web 可更新待办、进行中、待验收、待集成、拒绝、阻塞和失败状态，完成任务需通过技能的 `integrate`；已经用 `execution begin` 或 `run` 开始过的任务不能在页面上改状态。
+- 默认显示的是本仓库目录。要看自己的项目，点页面顶部的“登记项目”，填项目根目录的绝对路径。
+- 有任务列表和详情、概览页（`/overview`）和团队页（`/team`）。概览页和团队页只读。
+- 页面能改少数状态，但不能把任务标为完成：完成要通过技能的 `integrate`。已经用 `execution begin` 或 `run` 开始过的任务不能在页面上改状态。
+- 页面不会启动子 Agent，也不调用模型。服务只监听 `127.0.0.1`。
 
-团队页只用于监控：查看角色与模型、手动检查连接、核对最近子 Agent 的实际模型，并预览下一批及跳过原因。
-连接检查仅验证 droid 配置、BYOK 模型登记和服务 TCP 连接，不代表模型请求或鉴权成功；
-没有核对记录表示尚未核对。页面不会启动子 Agent 或编辑模型。
+页面内容、接口、读取哪些文件和故障排查见 [docs/web-ui.md](./docs/web-ui.md)。
 
-项目登记保存在 `.task-management/projects.json`，可用环境变量 `TASK_MANAGEMENT_PROJECTS_FILE` 指定独立注册表。
-默认项目 API 为 `/api/<resource>`，其他项目为 `/api/projects/<project_id>/<resource>`；
-任务读取 `planning/tasks.json`（库内兼容 `codex-tasks.json`），配置和历史分别读取
-`.task-management/config.json`、`.task-management/history/*.json`；
-概览页另外读取 `.task-management/checkpoint.json` 和 `planning/specs/*.md`（不含子目录和符号链接）。
-GET 请求不会初始化项目文件；旧注册表、旧运行记录和旧 run API 不再使用。
-服务只监听 `127.0.0.1`，拒绝跨站修改请求，并检查数据路径不会经符号链接越出项目。
+## 文档
 
-## 迁移指南
-
-从 `dual-ai-planning` 或 `dual-ai-collab` 迁移的命令对照和注意事项见
-[foreman/README.md](./foreman/README.md) 的“迁移指南”。
+| 想做什么 | 看哪里 |
+| --- | --- |
+| 安装和使用 foreman，查命令 | [foreman/README.md](./foreman/README.md) |
+| 完整工作流（Agent 执行技能时读的那份） | [foreman/SKILL.md](./foreman/SKILL.md) |
+| 验收证据格式、中断恢复和隔离边界 | [foreman/references/managed-workflow.md](./foreman/references/managed-workflow.md) |
+| 用 Web 界面监控任务 | [docs/web-ui.md](./docs/web-ui.md) |
+| 从 `dual-ai-planning` 或 `dual-ai-collab` 迁移 | [foreman/README.md](./foreman/README.md) 的“迁移指南” |
+| 参与开发 | [CONTRIBUTING.md](./CONTRIBUTING.md) |
+| 旧版 dual-ai-collab（不再更新） | [docs/legacy/](./docs/legacy/README.md) |
 
 ## 测试
 
@@ -123,7 +118,9 @@ dual-ai-collab/
 │   ├── scripts/
 │   └── references/
 ├── tests/                    # 测试
-├── docs/                     # 文档
+├── docs/
+│   ├── web-ui.md             # Web UI 使用指南
+│   └── legacy/               # 旧版的文档（不再更新）
 ├── web_server.py            # Web UI（可选）
 └── install.py               # 安装脚本
 ```
