@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import shutil
 import sys
@@ -33,33 +32,21 @@ def copy_tree(src: Path, dst: Path) -> None:
 
 
 def install(target_dir: Path, source_root: Path, force: bool, profile: str = "full") -> None:
-    if profile not in {"full", "planning", "task-management"}:
+    if profile not in {"full", "foreman"}:
         raise ValueError(f"Unknown profile: {profile}")
-    
-    # Task management profile (Droid native)
-    if profile == "task-management":
-        source = source_root / "task-management"
+
+    # Foreman profile (Droid native). It carries its own code, so the
+    # installed copy keeps working when this repository is moved or deleted.
+    if profile == "foreman":
+        source = source_root / "foreman"
         if not (source / "SKILL.md").is_file():
             raise FileNotFoundError(source / "SKILL.md")
         if target_dir.exists() and any(target_dir.iterdir()) and not force:
             raise RuntimeError(f"目标目录已存在且非空: {target_dir}；覆盖需 --force")
         copy_tree(source, target_dir)
-        print("提示：该技能使用原生 Droid Task 工具调度执行")
+        print("提示：规划、任务板和当前会话直接执行可立即使用；派发给固定模型角色需要 Droid")
         return
-    
-    # Planning profile (Codex)
-    if profile == "planning":
-        source = source_root / "skills" / "dual-ai-planning"
-        if not (source / "SKILL.md").is_file():
-            raise FileNotFoundError(source / "SKILL.md")
-        if target_dir.exists() and any(target_dir.iterdir()) and not force:
-            raise RuntimeError(f"目标目录已存在且非空: {target_dir}；覆盖需 --force")
-        copy_tree(source, target_dir)
-        (target_dir / "source.json").write_text(
-            json.dumps({"repository": str(source_root.resolve())}, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        return
+
     skill_root = source_root / "skill"
     skill_file = skill_root / "dual-ai-collab.md"
     scripts_dir = skill_root / "scripts"
@@ -85,7 +72,7 @@ def main() -> None:
     parser.add_argument(
         "--target",
         default=None,
-        help="安装目录（默认：full 安装到 Claude，planning 安装到 Codex）",
+        help="安装目录（默认：foreman 安装到 Droid，full 安装到 Claude）",
     )
     parser.add_argument(
         "--source",
@@ -99,29 +86,27 @@ def main() -> None:
     )
     parser.add_argument(
         "--profile",
-        choices=("full", "planning", "task-management"),
-        default="task-management",
-        help="task-management: Droid 原生任务管理 (默认), planning: Codex 规划技能, full: 完整 dual-ai-collab"
+        choices=("full", "foreman"),
+        default="foreman",
+        help="foreman: 规划、任务板和执行管理 (默认，已包含原 planning 技能), full: 旧版 dual-ai-collab"
     )
     args = parser.parse_args()
 
     source_root = Path(args.source).expanduser().resolve()
-    
+
     # 确定默认安装路径
-    if args.profile == "task-management":
-        default_target = Path(os.environ.get("FACTORY_SKILLS") or "~/.factory/skills") / "task-management"
-    elif args.profile == "planning":
-        default_target = Path(os.environ.get("CODEX_HOME") or "~/.codex") / "skills" / "dual-ai-planning"
+    if args.profile == "foreman":
+        default_target = Path(os.environ.get("FACTORY_SKILLS") or "~/.factory/skills") / "foreman"
     else:
         default_target = Path("~/.claude/skills/dual-ai-collab")
-    
+
     target_dir = Path(args.target or default_target).expanduser().resolve()
 
     try:
         install(target_dir, source_root, force=args.force, profile=args.profile)
     except (FileNotFoundError, RuntimeError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 
     print("INSTALL_OK")
     print(f"source: {source_root}")

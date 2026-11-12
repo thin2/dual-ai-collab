@@ -3,11 +3,13 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "skill" / "scripts"))
 
 import task_manager  # noqa: E402
-from tasks_store import read_tasks_document  # noqa: E402
+from tasks_store import CliError, read_tasks_document, write_tasks_document  # noqa: E402
 
 
 def write_board(path: Path, content: str) -> None:
@@ -37,6 +39,26 @@ def test_cmd_update_updates_json_and_markdown(tmp_path, monkeypatch, capsys):
     assert document["tasks"][0]["status"] == "DONE"
     assert '"status": "DONE"' in (tmp_path / "planning" / "tasks.json").read_text(encoding="utf-8")
     assert "**状态**: DONE" in board.read_text(encoding="utf-8")
+
+
+def test_cmd_update_refuses_task_managed_by_foreman(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    board = "planning/codex-tasks.md"
+    write_tasks_document({"tasks": [
+        {"id": "001", "title": "受管", "status": "IN_PROGRESS",
+         "execution_id": "001-20260101-000000-abcdef123456"},
+        {"id": "002", "title": "普通", "status": "OPEN"},
+    ]})
+    stored = (tmp_path / "planning" / "tasks.json").read_text(encoding="utf-8")
+
+    with pytest.raises(CliError, match="foreman"):
+        task_manager.cmd_update("001", "PENDING", board)
+    assert (tmp_path / "planning" / "tasks.json").read_text(encoding="utf-8") == stored
+
+    assert task_manager.cmd_update("002", "IN_PROGRESS", board) == 0
+    managed, plain = read_tasks_document(board)["tasks"]
+    assert (managed["status"], managed["execution_id"]) == ("IN_PROGRESS", "001-20260101-000000-abcdef123456")
+    assert plain["status"] == "IN_PROGRESS"
 
 
 def test_cmd_select_returns_no_executable_tasks_when_blocked(tmp_path, monkeypatch, capsys):

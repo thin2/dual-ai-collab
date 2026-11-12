@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""配置管理 - 支持用户自定义 complexity→droid 映射。"""
+"""配置管理 - complexity→droid 映射、角色→固定模型 droid 映射、并行与重试上限。"""
 
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
-from typing import Any
 
 
 class ExecutionConfig:
@@ -31,6 +31,11 @@ class ExecutionConfig:
                 "<=3": "medium",
                 ">3": "heavy"
             }
+        },
+        "roles": {},
+        "parallel": {
+            "max_parallel": 2,
+            "max_retries": 2
         }
     }
 
@@ -40,13 +45,19 @@ class ExecutionConfig:
         self.config = self._load()
 
     def _load(self) -> dict:
-        """加载配置"""
+        """加载配置；缺失的顶层项用默认值补齐"""
+        config = copy.deepcopy(self.DEFAULT_CONFIG)
         if self.config_file.exists():
             try:
-                return json.loads(self.config_file.read_text(encoding="utf-8"))
+                loaded = json.loads(self.config_file.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
-                pass
-        return self.DEFAULT_CONFIG.copy()
+                loaded = {}
+            for key, value in loaded.items():
+                if isinstance(value, dict) and isinstance(config.get(key), dict):
+                    config[key].update(value)
+                else:
+                    config[key] = value
+        return config
 
     def save(self) -> None:
         """保存配置"""
@@ -63,10 +74,34 @@ class ExecutionConfig:
         self.config["execution"][complexity] = droid
         self.save()
 
+    def get_roles(self) -> dict[str, dict]:
+        """获取所有角色配置：role → {droid, model, description, read_only}"""
+        return copy.deepcopy(self.config.get("roles", {}))
+
+    def get_role(self, role: str) -> dict | None:
+        entry = self.config.get("roles", {}).get(role)
+        return copy.deepcopy(entry) if entry else None
+
+    def set_role(self, role: str, entry: dict) -> None:
+        self.config.setdefault("roles", {})[role] = entry
+        self.save()
+
+    def remove_role(self, role: str) -> bool:
+        removed = self.config.get("roles", {}).pop(role, None) is not None
+        if removed:
+            self.save()
+        return removed
+
+    def get_max_parallel(self) -> int:
+        return max(1, int(self.config["parallel"].get("max_parallel", 2)))
+
+    def get_max_retries(self) -> int:
+        return max(0, int(self.config["parallel"].get("max_retries", 2)))
+
     def determine_complexity(self, task: dict) -> str:
         """
         确定任务的复杂度
-        
+
         优先级：
         1. 显式 execution_level 字段
         2. 任务类型匹配规则
@@ -94,4 +129,4 @@ class ExecutionConfig:
 
     def get_all_settings(self) -> dict:
         """获取所有配置"""
-        return self.config.copy()
+        return copy.deepcopy(self.config)

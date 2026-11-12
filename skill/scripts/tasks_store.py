@@ -306,9 +306,33 @@ def read_tasks_document(task_file: str | Path = DEFAULT_TASKS_MD, *, migrate: bo
     return document
 
 
+def _refuse_managed_status_change(paths: TaskPaths, normalized: dict) -> None:
+    """带 execution_id 的任务由 foreman 的受管派发维护状态，这里的任何写入都不能改它。
+
+    放在唯一的写入点，update、board review、board integrate 和验收回写都经过这里。
+    """
+    try:
+        previous = json.loads(paths.json_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    for old in previous.get("tasks", []) if isinstance(previous, dict) else []:
+        if not isinstance(old, dict) or not old.get("execution_id"):
+            continue
+        task_id = str(old.get("id", old.get("task_num", ""))).strip()
+        before = str(old.get("status", "")).strip()
+        current = find_task(normalized, task_id)
+        after = current["status"] if current else "已删除"
+        if after != before:
+            raise CliError(
+                f"任务 #{task_id} 由 foreman 的受管派发维护状态（{before} -> {after} 被拒绝）；"
+                "请用 foreman 的 execution finish/accept/retry/block/unblock 或 integrate 处理"
+            )
+
+
 def write_tasks_document(document: dict, task_file: str | Path = DEFAULT_TASKS_MD, *, sync_markdown: bool = True) -> dict:
     paths = resolve_task_paths(task_file)
     normalized = normalize_document(document, paths)
+    _refuse_managed_status_change(paths, normalized)
     atomic_write(paths.json_path, json.dumps(normalized, ensure_ascii=False, indent=2) + "\n")
     if sync_markdown:
         atomic_write(paths.markdown_path, render_markdown(normalized))

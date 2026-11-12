@@ -24,7 +24,7 @@ class CheckpointManager:
     def save(self, phase: str, **data: Any) -> None:
         """
         保存 checkpoint
-        
+
         Args:
             phase: 当前阶段 (planning, developing, reviewing)
             **data: 额外数据
@@ -34,7 +34,7 @@ class CheckpointManager:
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "data": data,
         }
-        
+
         self.checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
         content = json.dumps(checkpoint, ensure_ascii=False, indent=2) + "\n"
         atomic_write(self.checkpoint_file, content)
@@ -43,7 +43,7 @@ class CheckpointManager:
         """加载 checkpoint"""
         if not self.checkpoint_file.exists():
             return None
-        
+
         try:
             return json.loads(self.checkpoint_file.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -52,22 +52,22 @@ class CheckpointManager:
     def check(self) -> str:
         """检查 checkpoint 状态"""
         checkpoint = self.load()
-        
+
         if not checkpoint:
             return "NO_CHECKPOINT"
-        
+
         phase = checkpoint.get("phase", "unknown")
         data = checkpoint.get("data", {})
-        
+
         lines = [
             "CHECKPOINT_FOUND",
             f"Phase: {phase}",
             f"Time: {checkpoint.get('timestamp', 'unknown')}",
         ]
-        
+
         for key, value in data.items():
             lines.append(f"{key}: {value}")
-        
+
         return "\n".join(lines)
 
     def clear(self) -> None:

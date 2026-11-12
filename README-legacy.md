@@ -39,16 +39,12 @@ python3 skill/scripts/cli.py run complete 001 --repair
 
 ### 安装
 
-仅在 Codex 中使用规划与任务板（由当前会话直接开发，不调用其他模型 CLI）：
+只需要规划与任务板、由当前会话直接开发时，不要用本页的旧版脚本：原来的 `dual-ai-planning` 轻量技能已并入
+foreman，见 [README.md](./README.md)。
 
 ```bash
-python3 install.py --profile planning
+python3 install.py --profile foreman
 ```
-
-默认安装到 `~/.codex/skills/dual-ai-planning`（支持 `CODEX_HOME` 和 `--target`）。
-该轻量技能复用当前本地仓库，移动仓库后需重新安装；不复制执行适配器、不修改 Codex 全局配置。
-使用 `$dual-ai-planning` 制定计划或维护任务板。任务数据保存在使用它的项目中，兼容现有 Web 面板。
-它保留原有集成确认规则：实现和自审完成后仍待集成，不自动提交或标记已交付。
 
 ```bash
 # Python 3.9+，在仓库根目录执行

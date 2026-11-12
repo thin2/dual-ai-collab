@@ -58,6 +58,16 @@ def test_legacy_review_and_integration_unlock(project):
     assert projection(read_tasks_document())[0]['execution'] == 'interrupted'
 
 
+def test_review_refuses_task_managed_by_foreman(project):
+    doc = read_tasks_document()
+    doc['tasks'][0].update(status='AWAITING_REVIEW', execution_id='001-20260101-000000-abcdef123456')
+    write_tasks_document(doc)
+    with pytest.raises(CliError, match='foreman'):
+        review_task(args(project))
+    task = read_tasks_document()['tasks'][0]
+    assert task['status'] == 'AWAITING_REVIEW' and 'review' not in task
+
+
 def test_edit_contract_invalidates_receipts(project):
     review_task(args(project))
     doc = read_tasks_document()

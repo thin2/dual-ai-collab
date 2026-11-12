@@ -1,0 +1,406 @@
+# Foreman
+
+Droid 原生任务管理技能 - 规划、拆分、执行和验收完整工作流。原名 `task-management`；原来的 `dual-ai-planning`（当前会话自己规划并实现）也已经并入，现在只有这一个技能。
+
+每个任务按有没有 `role` 字段决定由谁来做：没写的由当前会话直接执行，写了的派给用户选定模型的固定角色。两种方式用同一套登记、验收和集成确认，可以在同一个任务板里混用。
+
+## 特性
+
+- 🎯 **需求访谈和复杂度判断**：根据需求规模调整规划深度
+- 📋 **任务板管理**：`add` 写入、`show` 查看、状态追踪、依赖分析
+- ✍️ **当前会话直接执行**：不派发子 Agent，同样记录文件基线、检查改动、逐项验收
+- 🤖 **原生 Droid 集成**：受管进程通过 Task 派发固定模型子 Agent
+- ⚙️ **灵活配置**：用户自定义 complexity→droid 映射
+- 🧩 **固定模型团队**：按角色分配用户选定的模型，主 Agent 不能更改
+- ⚡ **并行派发**：依赖已满足且文件不重叠的任务同时执行
+- ✅ **独立验收**：结构化条件、实际文件审查、逐项证据与变更失效检查
+- 📊 **执行历史**：追踪任务执行记录和性能数据
+- 🔄 **Checkpoint 恢复**：长期项目的进度保存和恢复
+- **完整模型选择**：推荐只排序，同名模型保留全部线路，支持搜索和直接输入完整 ID
+- **中断恢复**：派发结果与验收分开保存，失败后保留部分文件，不盲目重跑
+- **隔离预检**：临时原生沙箱、最小环境、固定假数据探针，失败不派发
+
+## 快速开始
+
+### 安装
+
+```bash
+# 安装到 Factory/Droid
+python install.py --profile foreman
+
+# 默认安装到 ~/.factory/skills/foreman
+# 可通过 FACTORY_SKILLS 环境变量或 --target 自定义
+```
+
+### 初始化项目
+
+```bash
+cd /path/to/your/project
+TM=~/.factory/skills/foreman/tools/cli.py
+python3 $TM init                          # 创建 planning/、.task-management/ 和空任务板
+python3 $TM add --file planning/plan.json # 写入任务（一个任务、任务列表或 {"tasks": [...]}）
+python3 $TM validate                      # 检查字段、依赖和角色
+python3 $TM show                          # 任务板：编号、状态、由谁执行、等待的依赖
+```
+
+## 核心工作流
+
+### 1. 规划阶段
+
+根据需求复杂度选择合适的规划深度：
+
+- **简单**（2-3 轮）：Bug 修复、小功能
+- **中等**（4-6 轮）：新页面、API 模块
+- **复杂**（6-10 轮）：认证、支付、架构变更
+
+访谈由本技能自己完成：先读仓库，只问会改变设计的问题，每轮结论写回规格文件。生成规格文档和任务板后运行 `validate`，在派发前列出缺字段、依赖不存在或成环、角色未配置的任务。
+
+### 2. 执行阶段
+
+`batch --json` 列出下一批可以开始的任务，每个任务的 `mode` 是 `direct` 或 `dispatch`。
+
+**当前会话直接执行（任务没写 `role`）**：
+
+```bash
+python3 $TM execution begin 001     # 登记开始、记录文件基线，输出任务上下文和 execution_id
+# 当前会话直接修改代码，只改任务 files 列出的路径
+python3 $TM execution finish <execution_id> --outcome completed
+```
+
+不需要组队、`preflight` 和调度模型。之后的验收和集成与派发的任务相同（见第 3、4 步），只是不做模型核对，验收记录会标明是自审。没做完时用 `finish --outcome failed` 加 `execution retry` 记下续做范围。
+
+**派给固定模型的角色（任务写了 `role`）**：
+
+```bash
+TM=<本技能目录>/tools/cli.py
+python3 $TM models --json --catalog
+# 角色和调度器都使用用户选择的完整模型 ID
+python3 $TM team check
+python3 $TM preflight --dispatcher "custom:<调度模型ID>"
+python3 $TM batch --json
+python3 $TM run 001 --dispatcher "custom:<调度模型ID>"
+```
+
+`run` 自动创建唯一编号、记录文件基线、更新状态，通过嵌套 `droid exec` 派发（工具列表为 Task 加子 Agent 需要的读写工具，临时守卫只允许调度会话调用一次 Task），结束后记录进程结果、核对本次实际模型并同步 checkpoint。两种方式的任务都要声明 `files`、结构化 `acceptance` 和 `runtime_dependencies`；`run` 只接受写了 `role` 的任务。独立任务可按 batch 并行运行。嵌套进程以 `--auto medium` 在沙箱内运行，子 Agent 可以跑测试和构建，但不能联网、提交或写任务板；派发结果以子 Agent 自己的结束方式为准。
+
+### 3. 验收和审查
+
+```bash
+python3 $TM execution inspect <execution_id>
+python3 $TM acceptance 001
+# 主 Agent 检查实际文件、运行验收并记录观察证据后
+python3 $TM execution accept <execution_id> --evidence-file planning/acceptance-001.json
+# 不完整时保留文件，记录续做范围再派发
+python3 $TM execution retry <execution_id> --reason "文件检查结论与还需完成的事项"
+```
+
+`inspect` 的 `notices` 会指出声明的文件完全没有变化，或派发期间有声明范围外的改动；后者必须在验收证据的 `undeclared` 字段说明。权限拒绝不代表没有写入文件，派发返回也不代表验收通过。`accept` 逐项检查证据和本次模型审计，保存独立时间戳；不会把失败派发改写成成功。证据格式、恢复和隔离边界见 [运行与恢复](references/managed-workflow.md)。
+
+### 4. 集成确认
+
+用户授权提交后，检查提交包含全部运行依赖，并在干净检出中启动和验收：
+
+```bash
+python3 $TM delivery --commit <SHA> --paths <运行依赖路径...>
+python3 $TM integrate 001 --commit <SHA>
+```
+
+受管任务缺少验收、模型审计、运行依赖，或验收后文件变化时不能集成。依赖被要求保留未提交时明确报告限制，不擅自提交。
+
+## 配置系统
+
+### 固定模型团队（按角色分配模型）
+
+主 Agent 按项目需求提出尽量少的角色，用户从自己配置的模型（`~/.factory/settings.json` 里的 BYOK 模型）中为每个角色选一个。每个角色对应一个项目级 droid，模型固定在 droid 文件里，主 Agent 不能更改。
+
+```bash
+TM=~/.factory/skills/foreman/tools/cli.py
+
+python3 $TM models                       # 列出可选模型（不含密钥）
+python3 $TM models --search "claude"      # 搜索，仍显示全量目录总数
+python3 $TM models --recommend "custom:<模型ID>"  # 只排序，不隐藏其他线路
+python3 $TM team set backend \
+  --model "custom:<模型ID>" \
+  --description "接口、数据库和业务逻辑"   # 生成 .factory/droids/tm-backend.md
+python3 $TM team show                    # 查看角色和模型
+python3 $TM team check                   # 派发前检查模型服务能否连通
+python3 $TM team audit                   # 核对子 Agent 实际用的模型
+python3 $TM team remove backend          # 删除角色
+```
+
+任务写上 `role` 和 `files`：
+
+```json
+{"id": "002", "title": "用户列表接口", "role": "backend", "files": ["api/users.py"]}
+```
+
+没写 `role` 的任务由当前会话直接执行，`run` 会拒绝它。推荐列表不能限制用户选择，未配置 ID 不自动替换。
+
+### 并行派发
+
+```bash
+python3 $TM batch --json      # 下一批可同时开始的任务，含 Task 调用参数 task_args
+python3 $TM execution retry <execution_id> --reason "文件检查与续做范围"
+python3 $TM integrate 002 --commit <SHA>     # 确认提交已集成，标记 DONE 并解锁后续任务
+```
+
+一批任务要满足：依赖已集成、角色已配置、修改的文件互不重叠，也不和未集成的任务重叠。默认每批最多 2 个，可用 `config set parallel.max_parallel=3` 调整。
+
+注意：
+- run 启动新进程加载角色；直接 Task 需当前会话已识别该角色。
+- 无效模型可能静默回退，所以受管执行按唯一编号核对本次实际模型。空记录或多条记录不能当作成功。
+
+### Complexity → Droid 映射
+
+只在当前会话想把直接执行任务的一部分交给通用子 Agent 时使用：`plan-execution 001 --json` 按任务复杂度给出 droid 和 Task 参数。这种子 Agent 不固定模型，也没有隔离和模型核对。
+
+配置文件：`.task-management/config.json`
+
+```json
+{
+  "execution": {
+    "light": "worker",
+    "medium": "code-architect",
+    "heavy": "worker"
+  },
+  "complexity_rules": {
+    "by_type": {
+      "docs": "light",
+      "test": "light",
+      "bugfix": "medium",
+      "feature": "medium",
+      "refactor": "heavy",
+      "architecture": "heavy"
+    }
+  }
+}
+```
+
+### 使用 CLI 配置
+
+```bash
+# 查看配置
+python tools/cli.py config show
+
+# 设置 droid 映射
+python tools/cli.py config set execution.medium=code-architect
+
+# 查看执行计划
+python tools/cli.py plan-execution 001
+python tools/cli.py plan-execution 001 --json
+```
+
+## CLI 命令
+
+```bash
+# 初始化
+python tools/cli.py init
+
+# 写入和查看任务
+python tools/cli.py add --file planning/plan.json [--replace]
+python tools/cli.py show                 # 任务板
+python tools/cli.py show 001             # 单个任务的完整上下文
+python tools/cli.py show --mermaid       # 依赖图
+
+# 选择下一个任务
+python tools/cli.py select
+
+# 任务统计
+python tools/cli.py status
+
+# 规划检查（缺字段、依赖不存在或成环、角色未配置；有问题时退出码 1）
+python tools/cli.py validate
+
+# 规划执行
+python tools/cli.py plan-execution 001
+
+# 更新状态（只用于从未 begin 过的旧任务）
+python tools/cli.py update 001 IN_PROGRESS
+
+# 当前会话直接执行（任务没写 role）
+python tools/cli.py execution begin 001
+python tools/cli.py execution finish <execution_id> --outcome completed
+
+# Checkpoint 管理
+python tools/cli.py checkpoint check
+python tools/cli.py checkpoint save --phase developing --data current_task=001
+
+# 查看历史
+python tools/cli.py history
+python tools/cli.py history --task-id 001
+
+# 提取验收命令
+python tools/cli.py acceptance 001
+
+# 固定模型团队和并行派发
+python tools/cli.py models
+python tools/cli.py team set|show|remove|check|audit
+python tools/cli.py batch --json
+python tools/cli.py fail 001 --reason "..."
+python tools/cli.py integrate 001 --commit <SHA>
+
+# 受管执行与恢复
+python tools/cli.py preflight --dispatcher "custom:<用户选定ID>"
+python tools/cli.py run 001 --dispatcher "custom:<用户选定ID>"
+python tools/cli.py execution recover
+python tools/cli.py execution inspect <execution_id>
+python tools/cli.py execution finish <execution_id> --outcome interrupted
+python tools/cli.py execution audit <execution_id>
+python tools/cli.py execution accept <execution_id> --evidence-file planning/acceptance-001.json
+python tools/cli.py execution retry <execution_id> --reason "保留部分成果，继续剩余工作"
+python tools/cli.py execution unblock <execution_id> --reason "用户已处理阻塞原因"
+python tools/cli.py execution sync
+python tools/cli.py delivery --commit HEAD --paths <运行依赖路径...>
+```
+
+## 测试
+
+在仓库根目录运行：
+
+```bash
+python3 -m pytest tests/test_foreman.py tests/test_foreman_team.py tests/test_foreman_workflow.py tests/test_install_pytest.py -q
+```
+
+## 迁移指南
+
+### 任务板文件
+
+任务数据在 `planning/tasks.json`，`planning/tasks.md` 是每次写入时生成的只读视图。
+
+早期版本把数据存在 `planning/codex-tasks.json`。`planning/tasks.json` 不存在时会自动读取旧文件，下一次写入（包括运行 `init`）会保存到 `planning/tasks.json`。旧的 `codex-tasks.json` 和 `codex-tasks.md` 不会被删除，确认新文件正确后可以自己删掉。
+
+### 从 task-management 改名
+
+技能从 `task-management` 改名为 `foreman`，只换了技能名和安装目录。项目里的 `.task-management/` 目录、角色 droid 的 `tm-` 前缀和文件里的 `managed-by: task-management` 标记、执行标记 `[tm:编号]` 都保持原样，已有任务板、角色和执行记录可以直接继续用。
+
+```bash
+python install.py --profile foreman
+rm -rf ~/.factory/skills/task-management   # 删除改名前的安装，避免出现两个相同的技能
+```
+
+### 从 dual-ai-planning 迁移
+
+`dual-ai-planning` 已并入本技能。数据文件同样是 `planning/tasks.json`，已有任务板可以直接读取；视图从 `planning/codex-tasks.md` 换成 `planning/tasks.md`。
+
+| 原来的命令（`planning.py ...`） | 现在（`tools/cli.py ...`） |
+|---|---|
+| `select`、`board show` | `select`、`show` |
+| `board context 001` | `show 001` |
+| `templates create ... --add` | 把任务写成 JSON，`add --file` |
+| `update 001 IN_PROGRESS` | `execution begin 001` |
+| `verify extract 001` | `acceptance 001` |
+| `verify run 001` | 当前会话读过命令后自己运行，结果写进验收 JSON |
+| `update 001 AWAITING_REVIEW`、`board review` | `execution finish <id> --outcome completed`、`execution accept <id>` |
+| `board integrate 001 --target --commit` | `integrate 001 --commit` |
+| `checkpoint-write`、`checkpoint-check` | `checkpoint save`、`checkpoint check` |
+| `visualize` | `show --mermaid` |
+| `summary`、`analyze` | `status`、`show`（不再生成分析报告） |
+
+不再提供的：任务模板、自动执行验收命令（`verify run`）、进度和分析报告。旧的 checkpoint 不会被读取，用 `checkpoint save` 重新保存。
+
+旧任务没有 `files` 和结构化 `acceptance`。用 `add --replace` 补齐后就能走 `execution begin`；不补也能继续用 `update` 和 `integrate`，但没有文件基线和验收记录。
+
+同一个任务板不要再用旧脚本写入：旧脚本每次写入都会按自己的格式改写整个任务板，文件锁也和本技能不兼容。
+
+### 从 dual-ai-collab 迁移
+
+1. 安装新技能：
+```bash
+python install.py --profile foreman
+```
+
+2. 任务板：
+- dual-ai-collab 的数据文件也是 `planning/tasks.json`，可以直接读取。
+- 旧字段会自动标准化（`task_num` → `id`，列表形式的依赖转成 `#001, #002`）。
+- 旧的 `planning/codex-tasks.md` 不再更新，新的视图是 `planning/tasks.md`。
+- 依赖只认 `DONE` 且带集成记录的任务。旧任务的审查和集成记录不会重新校验，有疑问的任务用 `integrate` 重新确认。
+
+3. 配置：
+- `.dual-ai-collab/model-routing.json` 不再读取，可以保留也可以删除。
+- 任务里的 `execution_level` 会自动换算：quick → light，normal → medium，heavy → heavy。
+- 需要固定模型时，用 `team set` 为每个角色指定模型，并在任务里写 `role`。
+
+4. 工作流：
+- 不再使用 `run start/stop` 命令，也不再调度外部 CLI 进程（codex/claude 命令）、按适配器路由和自动换模型。
+- 写了 `role` 的任务用受管 run，通过嵌套进程调用 Task；没写的由当前会话用 `execution begin` 直接执行。
+- 验收仍然由主 Agent 运行任务里的验收命令。
+
+## 可选工具
+
+### Web UI
+仓库根目录的 `web_server.py` 用于可视化监控（不随技能安装，需要在仓库里运行）：
+
+```bash
+python web_server.py 5001
+open http://localhost:5001
+```
+
+Web UI 支持多项目管理和状态查看。
+
+## 最佳实践
+
+1. **复杂度与需求匹配**：简单需求不要过度规划
+2. **任务拆分 1-3 小时**：便于验收和回滚
+3. **验收标准可执行**：写具体命令而非描述
+4. **配置 droid 映射**：根据项目特点选择合适的 droid
+5. **及时更新状态**：保持任务板与实际进度同步
+6. **完整集成确认**：不要跳过验证环节
+
+## 故障排查
+
+### 任务板不存在
+```bash
+python tools/cli.py init
+```
+
+### 角色的 droid 不存在
+角色的 droid 在项目的 `.factory/droids/tm-<角色>.md`，由 `team set` 生成：
+```bash
+python tools/cli.py team show     # 已配置的角色和模型
+python tools/cli.py team check    # 检查 droid 文件和模型服务
+```
+`plan-execution` 用到的通用 droid（如 `worker`）由 Droid 自带，或放在 `~/.factory/droids/`。
+
+### 配置丢失
+重新生成默认配置：
+```bash
+python tools/cli.py init
+```
+
+### 依赖循环
+`add` 不检查依赖。运行 `python tools/cli.py validate` 列出依赖环、不存在的依赖和缺失的字段；batch 无可执行任务时检查 skipped，不把依赖阻塞当作全部完成。
+
+## 架构
+
+```
+foreman/
+├── SKILL.md              # 技能主文件（完整工作流）
+├── README.md            # 本文件
+├── lib/                 # 核心库
+│   ├── __init__.py
+│   ├── store.py         # 任务存储
+│   ├── board.py         # 任务板管理
+│   ├── config.py        # 配置系统
+│   ├── executor.py      # 执行规划
+│   ├── history.py       # 执行历史
+│   ├── workflow.py      # 文件基线、恢复、验收、交付检查
+│   ├── plan.py          # 规划检查（validate）
+│   ├── team.py          # 固定模型角色与模型目录
+│   ├── runner.py        # 嵌套 Task 派发与自动记录
+│   ├── safety.py        # 单次运行的原生沙箱配置
+│   ├── probe.py         # 无敏感数据的隔离探针
+│   └── checkpoint.py    # Checkpoint 管理
+├── tools/
+│   ├── cli.py           # CLI 工具
+│   └── dispatch_guard.py # 工具 schema 和文件路径检查
+└── references/
+    └── managed-workflow.md # 证据格式、恢复步骤与保护边界
+```
+
+## 贡献
+
+欢迎提交 Issue 和 Pull Request！
+
+## 许可证
+
+MIT License

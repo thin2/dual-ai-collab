@@ -1,22 +1,22 @@
-"""Tests for task-management lib."""
+"""Tests for foreman lib."""
 
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-import sys
-task_mgmt_lib = Path(__file__).parent.parent / "task-management" / "lib"
-sys.path.insert(0, str(task_mgmt_lib))
+# 以 lib 包导入：其他测试会把 skill/scripts 放进 sys.path，那里也有 config.py
+sys.path.insert(0, str(Path(__file__).parent.parent / "foreman"))
 
-from store import write_tasks_document
-from board import TaskBoard
-from config import ExecutionConfig
-from executor import TaskExecutor
-from checkpoint import CheckpointManager
-from history import ExecutionHistory
+from lib.board import TaskBoard
+from lib.checkpoint import CheckpointManager
+from lib.config import ExecutionConfig
+from lib.executor import TaskExecutor
+from lib.history import ExecutionHistory
+from lib.store import write_tasks_document
 
 
 class TestTaskBoard(unittest.TestCase):
@@ -24,7 +24,7 @@ class TestTaskBoard(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.project_root = Path(self.temp_dir.name)
         (self.project_root / "planning").mkdir(parents=True)
-        
+
         # 创建测试任务板
         document = {
             "tasks": [
@@ -55,7 +55,7 @@ class TestTaskBoard(unittest.TestCase):
                 }
             ]
         }
-        write_tasks_document(document, self.project_root / "planning" / "codex-tasks.md")
+        write_tasks_document(document, self.project_root / "planning" / "tasks.md")
 
     def tearDown(self):
         self.temp_dir.cleanup()
@@ -74,7 +74,7 @@ class TestTaskBoard(unittest.TestCase):
     def test_update_status(self):
         board = TaskBoard.load(self.project_root)
         board.update_task_status("001", "IN_PROGRESS")
-        
+
         task = board.get_task("001")
         self.assertEqual(task["status"], "IN_PROGRESS")
 
@@ -88,7 +88,7 @@ class TestTaskBoard(unittest.TestCase):
         board = TaskBoard.load(self.project_root)
         task = board.get_task("001")
         context = board.build_context(task)
-        
+
         self.assertIn("任务 001", context)
         self.assertIn("测试任务1", context)
         self.assertIn("验收标准", context)
@@ -123,7 +123,7 @@ class TestExecutionConfig(unittest.TestCase):
         task = {"estimated_hours": 0.5}
         complexity = config.determine_complexity(task)
         self.assertEqual(complexity, "light")
-        
+
         task = {"estimated_hours": 5}
         complexity = config.determine_complexity(task)
         self.assertEqual(complexity, "heavy")
@@ -140,7 +140,7 @@ class TestTaskExecutor(unittest.TestCase):
         self.project_root = Path(self.temp_dir.name)
         (self.project_root / "planning").mkdir(parents=True)
         (self.project_root / ".task-management").mkdir(parents=True)
-        
+
         # 创建干净的默认配置
         config_file = self.project_root / ".task-management" / "config.json"
         config_file.write_text(json.dumps({
@@ -150,7 +150,7 @@ class TestTaskExecutor(unittest.TestCase):
                 "heavy": "worker"
             }
         }, ensure_ascii=False, indent=2), encoding="utf-8")
-        
+
         document = {
             "tasks": [
                 {
@@ -166,7 +166,7 @@ class TestTaskExecutor(unittest.TestCase):
                 }
             ]
         }
-        write_tasks_document(document, self.project_root / "planning" / "codex-tasks.md")
+        write_tasks_document(document, self.project_root / "planning" / "tasks.md")
 
     def tearDown(self):
         self.temp_dir.cleanup()
@@ -174,7 +174,7 @@ class TestTaskExecutor(unittest.TestCase):
     def test_plan_execution(self):
         executor = TaskExecutor(self.project_root)
         plan = executor.plan_execution("001")
-        
+
         self.assertEqual(plan["task_id"], "001")
         self.assertEqual(plan["complexity"], "medium")
         self.assertEqual(plan["droid"], "worker")
@@ -192,7 +192,7 @@ class TestCheckpoint(unittest.TestCase):
     def test_save_and_load(self):
         checkpoint = CheckpointManager(self.project_root)
         checkpoint.save("developing", current_task="001", total=5)
-        
+
         loaded = checkpoint.load()
         self.assertEqual(loaded["phase"], "developing")
         self.assertEqual(loaded["data"]["current_task"], "001")
@@ -206,7 +206,7 @@ class TestCheckpoint(unittest.TestCase):
         checkpoint = CheckpointManager(self.project_root)
         checkpoint.save("planning")
         checkpoint.clear()
-        
+
         self.assertIsNone(checkpoint.load())
 
 
@@ -221,11 +221,11 @@ class TestExecutionHistory(unittest.TestCase):
     def test_record_execution(self):
         history = ExecutionHistory(self.project_root)
         execution_id = history.record_start("001", "worker", "medium")
-        
+
         self.assertTrue(execution_id.startswith("001-"))
-        
+
         history.record_completion(execution_id, "success")
-        
+
         records = history.get_task_history("001")
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0].status, "success")
