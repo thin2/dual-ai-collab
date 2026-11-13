@@ -16,13 +16,28 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILL = ROOT / "foreman"
-DOCS = ["foreman/SKILL.md", "foreman/README.md", "foreman/references/managed-workflow.md", "docs/web-ui.md",
-        "README.md"]
+REFERENCES = sorted((SKILL / "references").glob("*.md"))
+DOCS = ["foreman/SKILL.md", "foreman/README.md", *(f"foreman/references/{path.name}" for path in REFERENCES),
+        "docs/web-ui.md", "README.md"]
 
 
 def frontmatter() -> dict:
     head = (SKILL / "SKILL.md").read_text(encoding="utf-8").split("---", 2)[1]
     return dict(line.split(": ", 1) for line in head.strip().splitlines())
+
+
+def skill_body() -> str:
+    return (SKILL / "SKILL.md").read_text(encoding="utf-8").split("---", 2)[2]
+
+
+def prose(text: str) -> str:
+    """A document without its fenced blocks: the part that talks about itself and about other documents."""
+    parts = re.split(r"^```.*$", text, flags=re.MULTILINE)
+    return "\n".join(parts[::2])
+
+
+def linked_references(skill_file: Path) -> set:
+    return set(re.findall(r"\]\((references/[^)#]+)", skill_file.read_text(encoding="utf-8")))
 
 
 def parser():
@@ -92,15 +107,54 @@ def test_documented_commands_are_accepted_by_the_command_line():
     assert checked > 100, "the scan no longer finds the commands in the docs"
 
 
-def test_skill_file_mentions_every_command_an_agent_can_run():
-    # An agent following the skill knows only the commands SKILL.md tells it about.
-    text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+def test_skill_file_and_its_references_mention_every_command_an_agent_can_run():
+    # An agent following the skill knows only the commands SKILL.md and the files it links to tell it about.
+    text = skill_body() + "".join(path.read_text(encoding="utf-8") for path in REFERENCES)
     commands = choices(parser())
     missing = [name for name in commands if not re.search(rf"(foreman |`){re.escape(name)}\b", text)]
     for group in ("execution", "team", "checkpoint", "config"):
         actions = next(action.choices for action in commands[group]._actions if action.dest == "action")
         missing += [f"{group} {name}" for name in actions if not re.search(rf"{group} {name}\b", text)]
     assert not missing
+
+
+def test_skill_file_is_short_enough_to_be_loaded_whole():
+    # The whole body is loaded when the skill is chosen; what only some runs need belongs in references/.
+    assert len(skill_body().splitlines()) <= 500
+
+
+def test_each_reference_is_reached_from_the_skill_file_and_stands_alone():
+    assert linked_references(SKILL / "SKILL.md") == {f"references/{path.name}" for path in REFERENCES}
+    for path in REFERENCES:
+        text = path.read_text(encoding="utf-8")
+        opening, *_ = text.split("\n## ", 1)
+        assert "读这份文件" in opening, f"{path.name} 开头要写明什么时候读它"
+        # A reader sent from one reference to another reads the second in part; SKILL.md is the only index.
+        assert not re.search(r"\]\(|references/", prose(text)), f"{path.name} 不能链接到别的文件"
+        sections = re.findall(r"^## (.+)$", prose(text), re.MULTILINE)
+        if len(text.splitlines()) > 100:
+            assert sections[0] == "目录", f"{path.name} 超过 100 行，开头要有目录"
+            contents = text.split("\n## 目录\n", 1)[1].split("\n## ", 1)[0]
+            assert re.findall(r"^\d+\. (.+)$", contents, re.MULTILINE) == sections[1:], path.name
+
+
+def test_section_numbers_in_the_text_name_sections_that_exist():
+    numbered = set(re.findall(r"^#{3,4} (\d(?:\.\d)?)[. ]", skill_body(), re.MULTILINE))
+    cited = {}
+    for name, text in [("SKILL.md", skill_body()), *((path.name, path.read_text(encoding="utf-8")) for path in REFERENCES)]:
+        for sub, top in re.findall(r"(?:见|按|在|的) (\d\.\d)(?![\d.])|第 (\d) 节", prose(text)):
+            cited.setdefault(sub or top, name)
+    assert not {number: name for number, name in cited.items() if number not in numbered}
+    assert len(cited) >= 8, "the scan no longer finds the section numbers in the text"
+
+
+def test_links_between_documents_point_at_files_that_exist():
+    broken = []
+    for doc in [*DOCS, "CONTRIBUTING.md"]:
+        for target in re.findall(r"\]\(([^)#\s]+)", prose((ROOT / doc).read_text(encoding="utf-8"))):
+            if "://" not in target and not (ROOT / doc).parent.joinpath(target).exists():
+                broken.append(f"{doc}: {target}")
+    assert not broken
 
 
 def task(task_id, **fields):
@@ -212,6 +266,15 @@ def test_installer_reports_the_version_it_installs_and_the_one_it_replaces(tmp_p
     skill_file = target / "SKILL.md"
     skill_file.write_text(skill_file.read_text(encoding="utf-8").replace(f"version: {version}\n", ""), encoding="utf-8")
     assert f"version: {version}（替换了没有版本号的旧版）\n" in install("--force").stdout
+
+
+def test_installed_copy_has_every_file_the_skill_file_links_to(tmp_path):
+    target = tmp_path / "skill"
+    installed = subprocess.run([sys.executable, str(ROOT / "install.py"), "--profile", "foreman", "--source", str(ROOT),
+                                "--target", str(target)], capture_output=True, text=True)
+    assert installed.returncode == 0, installed.stderr
+    links = linked_references(target / "SKILL.md")
+    assert links and all((target / link).is_file() for link in links)
 
 
 def as_windows(program, *args, cwd):

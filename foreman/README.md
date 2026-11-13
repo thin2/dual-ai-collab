@@ -105,7 +105,7 @@ foreman execution accept 001 --evidence-file planning/acceptance-001.json
 foreman execution retry 001 --reason "文件检查结论与还需完成的事项"
 ```
 
-`inspect` 的 `notices` 会指出声明的文件完全没有变化，或派发期间有声明范围外的改动；后者必须在验收证据的 `undeclared` 字段说明。权限拒绝不代表没有写入文件，派发返回也不代表验收通过。`accept` 逐项检查证据和本次模型审计，保存独立时间戳；不会把失败派发改写成成功。证据格式、恢复和隔离边界见 [运行与恢复](references/managed-workflow.md)。
+`inspect` 的 `notices` 会指出声明的文件完全没有变化，或派发期间有声明范围外的改动；后者必须在验收证据的 `undeclared` 字段说明。权限拒绝不代表没有写入文件，派发返回也不代表验收通过。`accept` 逐项检查证据和本次模型审计，保存独立时间戳；不会把失败派发改写成成功。证据格式和恢复步骤见 [执行记录、验收证据与恢复](references/managed-workflow.md)，派发的完整步骤和隔离边界见 [派给固定模型的角色](references/dispatch.md)。
 
 ### 4. 集成确认
 
@@ -364,6 +364,8 @@ open http://localhost:5001
 
 ## 故障排查
 
+下面是最常见的几种；按现象排查的完整列表在 [references/troubleshooting.md](references/troubleshooting.md)。
+
 ### 不知道哪里出了问题
 ```bash
 foreman doctor
@@ -402,7 +404,7 @@ foreman init
 
 ```
 foreman/
-├── SKILL.md              # 技能主文件（完整工作流）
+├── SKILL.md              # 技能主文件（主流程，细节在 references/）
 ├── README.md            # 本文件
 ├── lib/                 # 核心库
 │   ├── __init__.py
@@ -424,8 +426,11 @@ foreman/
 ├── tools/
 │   ├── cli.py           # CLI 实现
 │   └── dispatch_guard.py # 工具 schema 和文件路径检查
-└── references/
-    └── managed-workflow.md # 证据格式、恢复步骤与保护边界
+└── references/          # SKILL.md 按需引用的细节
+    ├── dispatch.md          # 组队、派发、模型核对与隔离边界
+    ├── managed-workflow.md  # 执行记录、证据格式、恢复步骤与交付检查
+    ├── configuration.md     # 配置项，按复杂度选通用子 Agent
+    └── troubleshooting.md   # 按现象排查
 ```
 
 ## 贡献

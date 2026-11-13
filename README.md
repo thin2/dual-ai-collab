@@ -78,8 +78,11 @@ open http://localhost:5001
 | 想做什么 | 看哪里 |
 | --- | --- |
 | 安装和使用 foreman，查命令 | [foreman/README.md](./foreman/README.md) |
-| 完整工作流（Agent 执行技能时读的那份） | [foreman/SKILL.md](./foreman/SKILL.md) |
-| 验收证据格式、中断恢复和隔离边界 | [foreman/references/managed-workflow.md](./foreman/references/managed-workflow.md) |
+| 主流程（Agent 执行技能时先读的那份） | [foreman/SKILL.md](./foreman/SKILL.md) |
+| 派给固定模型角色的步骤和隔离边界 | [foreman/references/dispatch.md](./foreman/references/dispatch.md) |
+| 验收证据格式、中断恢复和交付检查 | [foreman/references/managed-workflow.md](./foreman/references/managed-workflow.md) |
+| 配置项 | [foreman/references/configuration.md](./foreman/references/configuration.md) |
+| 命令报错时按现象排查 | [foreman/references/troubleshooting.md](./foreman/references/troubleshooting.md) |
 | 用 Web 界面监控任务 | [docs/web-ui.md](./docs/web-ui.md) |
 | 从 `dual-ai-planning` 或 `dual-ai-collab` 迁移 | [foreman/README.md](./foreman/README.md) 的“迁移指南” |
 | 参与开发 | [CONTRIBUTING.md](./CONTRIBUTING.md) |
@@ -118,7 +121,7 @@ dual-ai-collab/
 │   ├── bin/foreman           # 命令入口
 │   ├── lib/                  # 核心库
 │   ├── tools/                # CLI 实现
-│   └── references/
+│   └── references/           # SKILL.md 按需引用的细节
 ├── skill/                    # 旧版 dual-ai-collab（不再更新）
 │   ├── dual-ai-collab.md
 │   ├── scripts/
@@ -143,6 +146,7 @@ MIT License
 
 ## 版本历史
 
+- **v3.4** (2026-11) - SKILL.md 拆成主流程和按需读取的 `references/`；只看不改的命令和被拒绝的命令不再留下文件；在 Windows 上说明只支持 macOS 和 Linux 后退出；重新安装时删除上一版本留下、新版本不再包含的文件
 - **v3.3** (2026-11) - `foreman` 命令入口；`execution` 命令可以直接写任务 ID；错误提示说明文件、原因和下一步，损坏的配置不再被覆盖；新增 `doctor` 自检和 `--version`
 - **v3.2** (2026-11) - task-management 改名为 foreman；项目里的 `.task-management/` 和 `tm-` 前缀不变
 - **v3.1** (2026-11) - dual-ai-planning 并入 task-management：没写角色的任务由当前会话直接执行
