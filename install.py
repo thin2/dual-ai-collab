@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import sys
@@ -15,11 +16,13 @@ def copy_file(src: Path, dst: Path) -> None:
     shutil.copy2(src, dst)
 
 
-def copy_tree(src: Path, dst: Path) -> None:
+def copy_tree(src: Path, dst: Path) -> list[str]:
+    """Copy src into dst and return the files copied, as paths relative to dst."""
     if not src.exists():
         raise FileNotFoundError(src)
     dst.mkdir(parents=True, exist_ok=True)
     skip_dirs = {"__pycache__", ".mypy_cache"}
+    copied = []
     for path in src.rglob("*"):
         if any(part in skip_dirs for part in path.parts):
             continue
@@ -29,9 +32,61 @@ def copy_tree(src: Path, dst: Path) -> None:
             target.mkdir(parents=True, exist_ok=True)
         else:
             copy_file(path, target)
+            copied.append(relative.as_posix())
+    return copied
 
 
 LAUNCHER = Path("bin") / "foreman"
+# The files an install put in the skill folder, so the next install can tell its own leftovers from other files.
+MANIFEST = ".install-manifest.json"
+
+
+def recorded_files(target_dir: Path) -> list[str] | None:
+    """The files the last install recorded putting in target_dir; None when it left no usable record."""
+    try:
+        files = json.loads((target_dir / MANIFEST).read_text(encoding="utf-8"))["files"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    if not isinstance(files, list) or not all(isinstance(name, str) for name in files):
+        return None
+    return files
+
+
+def _remove_while_empty(folder: Path, root: Path) -> None:
+    while folder != root and root in folder.parents:
+        try:
+            folder.rmdir()
+        except OSError:
+            return
+        folder = folder.parent
+
+
+def remove_stale(target_dir: Path, recorded: list[str], files: list[str]) -> list[str]:
+    """Delete the files an earlier install put in target_dir that this version does not ship; return their names.
+
+    Only files that install recorded are candidates, so anything else in the folder is left alone.
+    """
+    root = target_dir.resolve()
+    shipped = [root / name for name in files]
+    removed = []
+    for name in sorted(set(recorded) - set(files)):
+        folder = (root / name).parent.resolve()
+        path = folder / Path(name).name
+        # The record is an editable file: a damaged one must not point this at anything outside the skill folder.
+        if folder != root and root not in folder.parents:
+            continue
+        # A name that differs only in case from a shipped one is the same file on macOS.
+        if not path.is_file() or any(path.samefile(other) for other in shipped):
+            continue
+        path.unlink()
+        removed.append(name)
+        cache = folder / "__pycache__"
+        if path.suffix == ".py" and cache.is_dir():
+            for compiled in cache.glob(f"{path.stem}.*.pyc"):
+                compiled.unlink()
+            _remove_while_empty(cache, root)
+        _remove_while_empty(folder, root)
+    return removed
 
 
 def check_platform(profile: str) -> None:
@@ -99,7 +154,8 @@ def launcher_notes(launcher: Path, link: Path | None) -> list[str]:
     return notes
 
 
-def install(target_dir: Path, source_root: Path, force: bool, profile: str = "full") -> None:
+def install(target_dir: Path, source_root: Path, force: bool, profile: str = "full") -> list[str]:
+    """Install the skill; return what to tell the user about files an earlier install left in target_dir."""
     if profile not in {"full", "foreman"}:
         raise ValueError(f"Unknown profile: {profile}")
 
@@ -111,11 +167,23 @@ def install(target_dir: Path, source_root: Path, force: bool, profile: str = "fu
             raise FileNotFoundError(source / "SKILL.md")
         if target_dir.exists() and any(target_dir.iterdir()) and not force:
             raise RuntimeError(f"目标目录已存在且非空: {target_dir}；覆盖需 --force")
-        copy_tree(source, target_dir)
+        replacing = (target_dir / "SKILL.md").is_file()
+        recorded = recorded_files(target_dir)
+        files = sorted(name for name in copy_tree(source, target_dir) if name != MANIFEST)
         # The source may come from an archive or a filesystem that dropped the mode bits.
         (target_dir / LAUNCHER).chmod(0o755)
+        notes = []
+        if recorded is not None:
+            removed = remove_stale(target_dir, recorded, files)
+            if removed:
+                notes.append(f"removed: {'、'.join(removed)}（上一版本安装的文件，这个版本不再包含）")
+        elif replacing:
+            notes.append("提示：上一次安装没有留下文件清单，这次没有清理旧文件；"
+                         "从这个版本起，重新安装会删除新版本不再包含的文件")
+        (target_dir / MANIFEST).write_text(json.dumps({"files": files}, ensure_ascii=False, indent=2) + "\n",
+                                           encoding="utf-8")
         print("提示：规划、任务板和当前会话直接执行可立即使用；派发给固定模型角色需要 Droid")
-        return
+        return notes
 
     skill_root = source_root / "skill"
     skill_file = skill_root / "dual-ai-collab.md"
@@ -135,6 +203,7 @@ def install(target_dir: Path, source_root: Path, force: bool, profile: str = "fu
     copy_file(skill_file, target_dir / "SKILL.md")
     copy_tree(scripts_dir, target_dir / "scripts")
     copy_tree(references_dir, target_dir / "references")
+    return []
 
 
 def main() -> None:
@@ -152,7 +221,7 @@ def main() -> None:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="覆盖已存在的安装目录内容",
+        help="覆盖已存在的安装目录内容；foreman 还会删除上一版本安装过、这个版本不再包含的文件",
     )
     parser.add_argument(
         "--profile",
@@ -187,7 +256,7 @@ def main() -> None:
         check_platform(args.profile)
         if link:
             check_link(link)  # before copying, so a refused link leaves nothing half installed
-        install(target_dir, source_root, force=args.force, profile=args.profile)
+        notes = install(target_dir, source_root, force=args.force, profile=args.profile)
         if link:
             link_launcher(target_dir / LAUNCHER, link)
     except (FileNotFoundError, RuntimeError) as exc:
@@ -202,7 +271,7 @@ def main() -> None:
         if replacing:
             replaced = f"（替换了 {previous}）" if previous else "（替换了没有版本号的旧版）"
         print(f"version: {skill_version(target_dir) or '未标注'}{replaced}")
-        print("\n".join(launcher_notes(target_dir / LAUNCHER, link)))
+        print("\n".join(notes + launcher_notes(target_dir / LAUNCHER, link)))
 
 
 if __name__ == "__main__":

@@ -28,6 +28,8 @@ python3 install.py --profile foreman --bin-dir ~/.local/bin
 
 安装的是完整副本，不依赖本仓库的位置。之后在自己的项目目录里运行 `foreman init`、`foreman show` 等命令；不加 `--bin-dir` 时用完整路径 `~/.factory/skills/foreman/bin/foreman`。
 
+升级时拉取新代码，同一条命令加上 `--force` 再运行一次。上一版本安装过、新版本不再包含的文件会被删除；你自己放进技能目录的文件不会动。
+
 **详细文档**：[foreman/README.md](./foreman/README.md)
 
 以前装过旧名字的技能的话，安装脚本不会动它们。装好 foreman 后自己删除，否则 Droid 里会同时出现两个内容相同的技能：

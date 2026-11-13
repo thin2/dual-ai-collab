@@ -38,6 +38,7 @@ python3 install.py --profile foreman --bin-dir ~/.local/bin
 
 - `--bin-dir` 指定的目录要在 `PATH` 里。安装脚本只创建一个链接，不修改 shell 配置；那里已经有别的 `foreman` 程序时会拒绝覆盖。
 - 不加 `--bin-dir` 时，用完整路径 `~/.factory/skills/foreman/bin/foreman` 运行。
+- 升级时加 `--force` 重新运行。安装脚本在技能目录里记下自己放了哪些文件（`.install-manifest.json`），下次安装时删除新版本不再包含的那些，其他文件不动。上一次安装没有这份清单时不删除任何文件，并在输出里说明。
 - 在本仓库里开发时，直接运行 `foreman/bin/foreman`。
 
 ### 初始化项目

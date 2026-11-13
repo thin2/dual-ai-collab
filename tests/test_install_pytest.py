@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -156,6 +157,106 @@ class InstallTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertEqual(self.run_installer(tmp, "--profile", "full").returncode, 2)
             self.assertFalse((Path(tmp) / "skill").exists())
+
+    def release(self, tmp, files):
+        """A repository root whose foreman/ holds exactly these files: one version of the skill."""
+        skill = Path(tmp) / "source" / "foreman"
+        if skill.exists():
+            shutil.rmtree(skill)
+        for name, content in {"SKILL.md": "---\nname: foreman\n---\n", "bin/foreman": "#!/bin/sh\n", **files}.items():
+            (skill / name).parent.mkdir(parents=True, exist_ok=True)
+            (skill / name).write_text(content, encoding="utf-8")
+        return skill.parent
+
+    def test_upgrade_removes_what_the_previous_version_installed_and_nothing_else(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "skill"
+            source = self.release(tmp, {"lib/kept.py": "", "lib/dropped.py": "", "references/dropped.md": "old",
+                                        "tools/only.py": ""})
+            self.assertEqual(install.install(target, source, force=False, profile="foreman"), [])
+            # The installed copy has been run, and its owner keeps files of their own in it.
+            for module in ("lib/kept", "lib/dropped", "tools/only"):
+                folder, stem = module.split("/")
+                (target / folder / "__pycache__").mkdir(exist_ok=True)
+                (target / folder / "__pycache__" / f"{stem}.cpython-39.pyc").write_bytes(b"")
+            (target / "notes.md").write_text("mine", encoding="utf-8")
+            (target / "lib" / "mine.py").write_text("mine", encoding="utf-8")
+
+            self.release(tmp, {"lib/kept.py": "", "docs/added.md": "new"})
+            notes = install.install(target, source, force=True, profile="foreman")
+            self.assertEqual(len(notes), 1)
+            self.assertTrue(notes[0].startswith("removed: lib/dropped.py、references/dropped.md、tools/only.py（"))
+            self.assertFalse((target / "lib" / "dropped.py").exists())
+            self.assertFalse((target / "lib" / "__pycache__" / "dropped.cpython-39.pyc").exists())
+            self.assertTrue((target / "lib" / "__pycache__" / "kept.cpython-39.pyc").exists())
+            # A folder goes once nothing is left in it, whether it held a document or a module that had been run.
+            self.assertFalse((target / "references").exists())
+            self.assertFalse((target / "tools").exists())
+            self.assertEqual((target / "docs" / "added.md").read_text(encoding="utf-8"), "new")
+            self.assertEqual((target / "notes.md").read_text(encoding="utf-8"), "mine")
+            self.assertEqual((target / "lib" / "mine.py").read_text(encoding="utf-8"), "mine")
+            self.assertEqual(install.install(target, source, force=True, profile="foreman"), [])
+
+    def test_install_over_one_that_left_no_record_deletes_nothing_and_says_so(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "skill"
+            source = self.release(tmp, {"lib/old.py": ""})
+            install.install(target, source, force=False, profile="foreman")
+            (target / install.MANIFEST).unlink()  # as installed by a version that kept no record
+            self.release(tmp, {"lib/new.py": ""})
+            notes = install.install(target, source, force=True, profile="foreman")
+            self.assertEqual(len(notes), 1)
+            self.assertIn("没有留下文件清单", notes[0])
+            self.assertTrue((target / "lib" / "old.py").exists())
+            # From here on there is a record, so the next upgrade cleans up after this one.
+            self.release(tmp, {})
+            self.assertTrue(install.install(target, source, force=True, profile="foreman")[0].startswith(
+                "removed: lib/new.py（"))
+            self.assertTrue((target / "lib" / "old.py").exists())
+
+    def test_damaged_record_cannot_delete_outside_the_skill_or_a_file_this_version_ships(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "skill"
+            source = self.release(tmp, {"lib/kept.py": ""})
+            install.install(target, source, force=False, profile="foreman")
+            outside = Path(tmp) / "outside.txt"
+            outside.write_text("not the skill's", encoding="utf-8")
+            for record in ({"files": ["../outside.txt", str(outside), "lib/../SKILL.md", "lib", ""]},
+                           {"files": "lib/kept.py"}, ["lib/kept.py"], None):
+                with self.subTest(record=record):
+                    content = "{" if record is None else json.dumps(record)
+                    (target / install.MANIFEST).write_text(content, encoding="utf-8")
+                    notes = install.install(target, source, force=True, profile="foreman")
+                    self.assertFalse(any(note.startswith("removed:") for note in notes), notes)
+                    self.assertTrue(outside.exists())
+                    self.assertTrue((target / "SKILL.md").exists() and (target / "lib" / "kept.py").exists())
+
+    def test_renaming_a_file_only_by_case_keeps_the_new_one(self):
+        # On macOS both names are one file: removing the old name would delete what was just installed.
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "skill"
+            source = self.release(tmp, {"references/Guide.md": "old"})
+            install.install(target, source, force=False, profile="foreman")
+            self.release(tmp, {"references/guide.md": "new"})
+            install.install(target, source, force=True, profile="foreman")
+            self.assertEqual((target / "references" / "guide.md").read_text(encoding="utf-8"), "new")
+
+    def test_record_lists_exactly_the_files_of_the_installed_skill(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "skill"
+            for extra in ((), ("--force",)):
+                installed = self.run_installer(tmp, *extra)
+                self.assertEqual(installed.returncode, 0, installed.stderr)
+                self.assertNotIn("removed:", installed.stdout)
+                self.assertNotIn("文件清单", installed.stdout)
+                # Running the installed command leaves compiled files, which are not part of the skill.
+                subprocess.run([str(target / "bin" / "foreman"), "--version"], capture_output=True, check=True)
+            recorded = json.loads((target / install.MANIFEST).read_text(encoding="utf-8"))["files"]
+            present = {path.relative_to(target).as_posix() for path in target.rglob("*")
+                       if path.is_file() and "__pycache__" not in path.parts and path.name != install.MANIFEST}
+            self.assertEqual(set(recorded), present)
+            self.assertIn("SKILL.md", recorded)
+            self.assertIn("bin/foreman", recorded)
 
     def test_installer_says_what_to_type_when_foreman_is_not_on_path(self):
         launcher = Path("/skills/foreman/bin/foreman")
