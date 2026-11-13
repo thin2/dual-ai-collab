@@ -38,7 +38,13 @@ from lib.store import (  # noqa: E402
     describe_error,
 )
 from lib.team import model_catalog  # noqa: E402
-from lib.workflow import Workflow, delivery_check, evidence_template, is_direct, resolve_commit  # noqa: E402
+from lib.workflow import (  # noqa: E402
+    Workflow,
+    delivery_check,
+    evidence_template,
+    is_direct,
+    resolve_commit,
+)
 
 
 def _print_json(data) -> None:

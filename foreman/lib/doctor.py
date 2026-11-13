@@ -43,7 +43,8 @@ def diagnose(root: Path | None, cwd: Path) -> list[dict]:
 
     report(OK, "技能", f"foreman {skill_version()}，位于 {SKILL_ROOT}")
     version = ".".join(map(str, sys.version_info[:3]))
-    if sys.version_info >= (3, 9):
+    # Not dead code: on an older Python this command still starts, and this is where it says so.
+    if sys.version_info >= (3, 9):  # noqa: UP036
         report(OK, "Python", version)
     else:
         report(PROBLEM, "Python", f"{version}，需要 3.9 或更高", "换用更新的 python3")
