@@ -35,7 +35,8 @@ def check_dependencies(task, workdir):
     if not isinstance(python, str):
         raise CliError('runtime_dependencies.python_executable 必须是字符串')
     if '/' in python or '\\' in python:
-        python = str((Path(workdir) / python).resolve())
+        # A virtual environment's interpreter is a symlink to the base one; following it loses the environment.
+        python = str(Path(workdir).resolve() / python)
     missing = []
     if deps.get('python'):
         try:

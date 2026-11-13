@@ -115,6 +115,25 @@ def test_dependency_check_versions_missing_and_separate_task_dependencies(blocke
         check_dependencies({'runtime_dependencies': {'python': 'flask'}}, blocked)
 
 
+@pytest.mark.skipif(sys.platform == 'win32', reason='虚拟环境的解释器只在 POSIX 上是符号链接')
+def test_dependency_check_sees_packages_installed_in_a_virtual_environment(tmp_path):
+    subprocess.run([sys.executable, '-m', 'venv', '--without-pip', str(tmp_path / 'venv')],
+                   check=True, capture_output=True, timeout=60)
+    python = tmp_path / 'venv/bin/python'
+    assert python.is_symlink()
+    site_packages = subprocess.run([str(python), '-c', 'import sysconfig; print(sysconfig.get_path("purelib"))'],
+                                   check=True, capture_output=True, text=True, timeout=15).stdout.strip()
+    metadata = Path(site_packages) / 'dual_ai_fixture-1.2.3.dist-info/METADATA'
+    metadata.parent.mkdir(parents=True)
+    metadata.write_text('Metadata-Version: 2.1\nName: dual-ai-fixture\nVersion: 1.2.3\n')
+    for executable in ('venv/bin/python', str(python)):
+        task = {'runtime_dependencies': {'python': ['dual-ai-fixture>=1', 'dual-ai-fixture>2'],
+                                         'python_executable': executable}}
+        result = check_dependencies(task, tmp_path)
+        assert result['missing'] == ['dual-ai-fixture>2']
+        assert Path(result['python_executable']) == tmp_path.resolve() / 'venv/bin/python'
+
+
 def test_priority_timeout_precedence(blocked):
     assert turn_timeout('001', {}, {}) == 1200
     assert turn_timeout('001', {}, {'app_server_priority_timeouts': {'P1': 42}}) == 42
