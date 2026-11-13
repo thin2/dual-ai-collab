@@ -42,8 +42,8 @@ class ExecutionHistory:
 
     def __init__(self, project_root: Path):
         self.project_root = project_root
+        # 写第一条记录时才创建：查看历史不应该在目录里留下东西
         self.history_dir = project_root / ".task-management" / "history"
-        self.history_dir.mkdir(parents=True, exist_ok=True)
         # 最近一次列出记录时读不出来、被跳过的文件名
         self.unreadable: list[str] = []
 
@@ -141,6 +141,7 @@ class ExecutionHistory:
         self._validate_id(execution_id)
         file_path = self.history_dir / f"{execution_id}.json"
         content = json.dumps(asdict(record), ensure_ascii=False, indent=2) + "\n"
+        self.history_dir.mkdir(parents=True, exist_ok=True)
         atomic_write(file_path, content)
 
     def _load_record(self, execution_id: str) -> ExecutionRecord | None:

@@ -192,8 +192,12 @@ def update_tasks_document(task_file: str | Path, mutate) -> Any:
     """在同一把文件锁内读取、修改并写回任务文档，返回 mutate 的结果。
 
     只锁写入时，并发的“读、改、写”会互相覆盖。mutate 抛出异常时不写入。
+
+    mutate 会被调用两次，所以它只能修改传给它的文档：第一次在加锁之前，用一份不会写回的文档，
+    会被拒绝的修改在这里就报错，不必为它创建目录和锁文件。
     """
     paths = resolve_task_paths(task_file)
+    mutate(read_tasks_document(task_file))
     paths.json_path.parent.mkdir(parents=True, exist_ok=True)
     with _file_lock(paths.json_path):
         document = read_tasks_document(task_file)

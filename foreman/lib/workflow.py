@@ -219,6 +219,16 @@ class Workflow:
         self.lock = self.root / ".task-management" / "workflow"
         self.checkpoint_set_aside: Path | None = None
 
+    def _task(self, task_id: str) -> dict:
+        """The task, or the refusal for an ID that is not on the board.
+
+        begin and integrate ask before taking the lock, so a mistyped ID does not create .task-management/.
+        """
+        task = self.board.get_task(task_id)
+        if not task:
+            raise ValueError(f"任务 {task_id} 不存在")
+        return task
+
     def current_record(self, task: dict):
         """The run the board currently points this task at; None before its first begin."""
         return self.history._load_record(task["execution_id"]) if task.get("execution_id") else None
@@ -303,6 +313,7 @@ class Workflow:
         checkpoint.save("completed" if tasks and completed == len(tasks) else "developing", **data)
 
     def begin(self, task_id: str) -> dict:
+        self._task(task_id)
         with _file_lock(self.lock):
             plan = TaskExecutor(self.root).plan_execution(task_id)
             task = self.board.get_task(task_id)
@@ -565,9 +576,7 @@ class Workflow:
             self.sync()
 
     def integration_ready(self, task_id: str, commit: str | None = None, repo: Path | None = None):
-        task = self.board.get_task(task_id)
-        if not task:
-            raise ValueError(f"任务 {task_id} 不存在")
+        task = self._task(task_id)
         if not task.get("execution_id"):
             return  # Legacy tasks retain their existing integration contract.
         if task["status"] != "AWAITING_INTEGRATION":
@@ -598,6 +607,7 @@ class Workflow:
 
     def integrate(self, task_id: str, commit: str, repo: Path, note: str = "") -> dict:
         """Check, record the commit and mark DONE under one lock so nothing interleaves."""
+        self._task(task_id)
         with _file_lock(self.lock):
             task = self.board.get_task(task_id)
             if task and task.get("execution_id") and task["status"] == "DONE":

@@ -114,12 +114,9 @@ def _checkpoint(root: Path, report) -> None:
 
 
 def _records(root: Path, tasks: list[dict], report) -> None:
-    folder = root / ".task-management" / "history"
-    records, unreadable = [], []
-    # ExecutionHistory creates its folder, and a check must not write.
-    if folder.is_dir():
-        history = ExecutionHistory(root)
-        records, unreadable = history.get_all_history(), history.unreadable
+    history = ExecutionHistory(root)
+    folder = history.history_dir
+    records, unreadable = history.get_all_history(), history.unreadable
     lost = [f"任务 {task.get('id')} 的 {task['execution_id']}" for task in tasks
             if task.get("execution_id") and not (folder / f"{task['execution_id']}.json").is_file()]
     running = [record.execution_id or record.task_id for record in records if record.status == "running"]
