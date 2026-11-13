@@ -109,11 +109,11 @@ foreman execution retry 001 --reason "文件检查结论与还需完成的事项
 
 ### 4. 集成确认
 
-用户授权提交后，检查提交包含全部运行依赖，并在干净检出中启动和验收：
+用户授权提交后按任务分别提交，逐个确认集成。全部集成后检查最后的提交包含全部运行依赖，并在干净检出中启动和验收：
 
 ```bash
-foreman delivery --commit <SHA> --paths <运行依赖路径...>
 foreman integrate 001 --commit <SHA>
+foreman delivery --commit HEAD --paths <各任务运行依赖的并集...>
 ```
 
 受管任务缺少验收、模型审计、运行依赖，或验收后文件变化时不能集成。依赖被要求保留未提交时明确报告限制，不擅自提交。
@@ -148,7 +148,7 @@ foreman team remove backend          # 删除角色
 ### 并行派发
 
 ```bash
-foreman batch --json      # 下一批可同时开始的任务，含 Task 调用参数 task_args
+foreman batch --json      # 下一批可同时开始的任务；派发的任务带 Task 调用参数 task_args
 foreman execution retry <execution_id> --reason "文件检查与续做范围"
 foreman integrate 002 --commit <SHA>     # 确认提交已集成，标记 DONE 并解锁后续任务
 ```
@@ -370,7 +370,7 @@ open http://localhost:5001
 ```bash
 foreman doctor
 ```
-只读自检，逐项列出环境和项目数据的状态；“问题”一项会让命令用不了，退出码为 1。
+只读自检，逐项列出环境和项目数据的状态；“问题”一项会让一部分命令用不了，退出码为 1。
 
 ### 任务板不存在
 ```bash

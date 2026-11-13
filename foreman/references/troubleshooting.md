@@ -8,7 +8,9 @@
 foreman doctor    # 加 --json 输出结构化结果
 ```
 
-它只读不写，逐项列出 Python、git、`foreman` 是否在 PATH、任务板、配置、checkpoint、执行记录，以及派发需要的 droid、模型配置和角色。“问题”一项会让命令用不了，退出码为 1；“注意”不影响当前能做的事。规划本身的问题仍用 `validate`。
+它只读不写，逐项列出 Python、git、`foreman` 是否在 PATH、任务板、配置、checkpoint、执行记录，以及派发需要的 droid、模型配置和角色。“问题”一项会让一部分命令用不了，退出码为 1；“注意”不影响当前能做的事。规划本身的问题仍用 `validate`。
+
+“droid”“模型配置”“角色”三项只关系到写了 `role` 的任务。有任务在等用户为角色选模型时，“角色”是问题属于预期：直接执行的任务照常进行，那个任务按没完成汇报。
 
 ## 任务板不存在
 
@@ -43,6 +45,16 @@ foreman validate
 ```
 
 `add` 写入后只列出这批任务自己的问题；`validate` 检查整个任务板，会列出依赖环、不存在的依赖和缺失的字段。
+
+## execution accept 提示“实际模型尚未核对通过”
+
+派发的任务要先核对子 Agent 实际使用的模型，通过后才能验收：
+
+```bash
+foreman execution audit <execution_id>
+```
+
+`run` 结束时会自动核对一次；出现这条提示，说明那次没有通过，或者任务是手工用 Task 派发的。仍不通过时不要换模型，也不要改记录：检查实际文件后运行 `execution block <execution_id> --reason "实际模型不符及文件检查结果"`，报告用户。当前会话直接执行的任务没有这一步。
 
 ## 派发结果是 permission_rejected
 

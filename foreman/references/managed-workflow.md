@@ -59,7 +59,7 @@
 }
 ```
 
-`execution inspect` 报出声明范围外的改动（`undeclared.paths` 不为空）时，证据里还要加一个 `undeclared` 字段，写明这些改动的来源和处理结论，例如 `"undeclared": "notes.md 是子 Agent 的草稿，已删除"`。没有这类改动时不需要这个字段。派发期间只是把已有改动提交进去（HEAD 变化但文件内容没变）不算范围外改动。
+`execution inspect` 报出声明范围外的改动（`undeclared.paths` 不为空）时，证据里还要加一个 `undeclared` 字段，写明这些改动的来源和处理结论，例如 `"undeclared": "notes.md 是子 Agent 的草稿，已删除"`，或 `"undeclared": "notes.md 是上个会话留下的备注，和本任务无关，保留"`。不是自己写的文件不要为了让这一项消失而删除。没有这类改动时不需要这个字段。派发期间只是把已有改动提交进去（HEAD 变化但文件内容没变）不算范围外改动。
 
 `acceptance <task-id> --template` 在任务板目录生成 `acceptance-<task-id>.json`：`checks` 照抄每个验收条件（多出的 scenario、expected 等字段只供参考），`status`、`evidence`、`inspection` 留空，有范围外改动时多一个空的 `undeclared`。原样提交会被拒绝。
 
@@ -71,7 +71,7 @@
 
 1. `execution recover` 找到尚未集成的运行，确认旧进程是否已结束。它不是进程存活检测器。
 2. 已停止但仍 running：`execution finish <id> --outcome interrupted`。知道实际结束时间才加 `--ended-at`。
-3. `execution inspect <id>` 检查与派发前相比新增/修改/删除的文件，再查看实际 diff 与新增文件内容。摘要不提供作者归属。`notices` 会指出声明的 files 完全没有变化，或派发期间有声明范围外的改动。
+3. `execution inspect <id>` 检查与派发前相比新增/修改/删除的文件，再查看实际 diff 与新增文件内容。摘要不提供作者归属。`notices` 会指出声明的 files 完全没有变化，或派发期间有声明范围外的改动。记录还是 running 时也可以运行：这时没有 `notices`，`undeclared` 是当前的快照，接手直接执行的任务前先看它，里面是上个会话留在 files 之外的文件。
 4. 核对本次实际模型。权限拒绝后文件可能完整，模型错误也可能留下文件；不要未经检查直接重跑。
 5. 完整成果由主 Agent 验收；不完整则 `execution retry <id> --reason <检查结论和续做范围>`；模型不可用/不符则 block，报告用户处理。所有路径都保留现有文件。
 6. 任务 BLOCKED（显式 block 或超过重试上限）后等用户处理，再用 `execution unblock <id> --reason <用户的处理结果>` 回到 PENDING，失败次数清零并保留原因。BLOCKED 任务不能 retry。
@@ -82,6 +82,8 @@
 
 `delivery --commit <SHA> --paths <完整依赖路径...>` 比较提交和工作区：缺失文件、未提交修改及只在工作区删除的文件都会阻止通过。它不自动推断全部依赖，也不启动程序。
 
-主 Agent 根据实际入口填写 runtime_dependencies，包括本地库、模板、静态资源和依赖清单。提交前审查暂存区，提交后在临时干净检出中执行实际启动与验收；不要使用工作区未提交的文件补齐检出。需要外部服务或凭据时说明复现前提，不复制真实凭据到检出。
+`integrate` 已经对每个任务自己的 files 和 runtime_dependencies 做过同样的比较。`delivery` 用在要交付的任务全部集成之后：对最后的提交运行一次，`--paths` 写各任务 runtime_dependencies 的并集，确认后来的任务没有让前面任务依赖的文件停在未提交状态。
+
+主 Agent 根据实际入口填写 runtime_dependencies，包括本地库、模板、静态资源和依赖清单。提交前审查暂存区，提交后在临时干净检出中执行实际启动与验收；不要使用工作区未提交的文件补齐检出。干净检出放在项目目录之外（例如 `git archive <SHA> | tar -xf - -C <临时目录>`），用完删除：放在项目里会成为未跟踪文件，被进行中的任务记成范围外改动。需要外部服务或凭据时说明复现前提，不复制真实凭据到检出。
 
 用户要求某些依赖保持未提交时，保持这个边界，明确报告交付因此受阻，不擅自提交。

@@ -146,7 +146,7 @@ MIT License
 
 ## 版本历史
 
-- **v3.4** (2026-11) - SKILL.md 拆成主流程和按需读取的 `references/`；只看不改的命令和被拒绝的命令不再留下文件；在 Windows 上说明只支持 macOS 和 Linux 后退出；重新安装时删除上一版本留下、新版本不再包含的文件
+- **v3.4** (2026-11) - SKILL.md 拆成主流程和按需读取的 `references/`；只看不改的命令和被拒绝的命令不再留下文件；在 Windows 上说明只支持 macOS 和 Linux 后退出；重新安装时删除上一版本留下、新版本不再包含的文件；按两次完整走查修正 `show`、`batch`、`execution accept`、`inspect`、`recover` 的输出，依赖可以用中文逗号或顿号分隔
 - **v3.3** (2026-11) - `foreman` 命令入口；`execution` 命令可以直接写任务 ID；错误提示说明文件、原因和下一步，损坏的配置不再被覆盖；新增 `doctor` 自检和 `--version`
 - **v3.2** (2026-11) - task-management 改名为 foreman；项目里的 `.task-management/` 和 `tm-` 前缀不变
 - **v3.1** (2026-11) - dual-ai-planning 并入 task-management：没写角色的任务由当前会话直接执行
