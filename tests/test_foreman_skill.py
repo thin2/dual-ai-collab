@@ -65,6 +65,9 @@ def test_version_is_what_the_command_and_the_changelog_say():
     assert shown.stdout == f"foreman {version}\n", shown.stderr
     latest = re.search(r"^- \*\*v(\d+\.\d+)\*\*", (ROOT / "README.md").read_text(encoding="utf-8"), re.MULTILINE)
     assert version.startswith(latest.group(1) + ".")
+    # The repository is released as this skill, so its package metadata carries the same number.
+    declared = re.search(r'^version = "(.+)"$', (ROOT / "pyproject.toml").read_text(encoding="utf-8"), re.MULTILINE)
+    assert declared.group(1) == version
 
 
 def documented_commands():
