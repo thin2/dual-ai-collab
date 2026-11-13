@@ -212,3 +212,34 @@ def test_installer_reports_the_version_it_installs_and_the_one_it_replaces(tmp_p
     skill_file = target / "SKILL.md"
     skill_file.write_text(skill_file.read_text(encoding="utf-8").replace(f"version: {version}\n", ""), encoding="utf-8")
     assert f"version: {version}（替换了没有版本号的旧版）\n" in install("--force").stdout
+
+
+def as_windows(program, *args, cwd):
+    """Start a program the way Windows does: sys.platform already says win32 when its first line runs."""
+    # flask and subprocess load first; imported under win32 they look for Windows modules this machine lacks.
+    code = ("import runpy, subprocess, sys\nimport flask\nsys.platform = 'win32'\nsys.argv = sys.argv[1:]\n"
+            "runpy.run_path(sys.argv[0], run_name='__main__')")
+    # The timeout is for the web server: without its check it would start and serve until killed.
+    return subprocess.run([sys.executable, "-c", code, str(ROOT / program), *args], cwd=cwd, capture_output=True,
+                          text=True, timeout=30)
+
+
+@pytest.mark.parametrize("program", [
+    ("foreman/bin/foreman", "status"),
+    ("foreman/tools/cli.py", "init"),
+    ("web_server.py", "5999"),
+    ("install.py", "--target", "skill"),
+])
+def test_windows_is_told_once_that_only_macos_and_linux_are_supported(program, tmp_path):
+    refused = as_windows(*program, cwd=tmp_path)
+    assert refused.returncode == 1 and refused.stdout == "", refused.stdout + refused.stderr
+    # Also in English: a console that cannot show Chinese is likeliest on the system this message is for.
+    assert "只支持 macOS 和 Linux" in refused.stderr and "macOS and Linux only" in refused.stderr
+    assert "WSL" in refused.stderr and "Traceback" not in refused.stderr
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_windows_can_still_install_the_legacy_skill(tmp_path):
+    installed = as_windows("install.py", "--profile", "full", "--source", str(ROOT), "--target", "skill", cwd=tmp_path)
+    assert installed.returncode == 0, installed.stderr
+    assert (tmp_path / "skill" / "SKILL.md").is_file()

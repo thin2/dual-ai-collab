@@ -12,6 +12,11 @@ from urllib.parse import urlsplit
 from flask import Flask, abort, jsonify, render_template, request
 from werkzeug.exceptions import HTTPException
 
+# The foreman library and the project registry lock files with fcntl, which Windows does not have.
+if sys.platform == 'win32':
+    sys.exit('Web UI 只支持 macOS 和 Linux；Windows 上请在 WSL 里运行。\n'
+             'The web UI runs on macOS and Linux only. On Windows, run it inside WSL.')
+
 REPO_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(REPO_ROOT / 'foreman'))
 from lib.board import TaskBoard  # noqa: E402

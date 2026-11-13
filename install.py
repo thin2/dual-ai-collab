@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cross-platform installer for the Dual AI Collaboration skill."""
+"""Installer for the foreman skill (macOS and Linux) and the legacy dual-ai-collab skill."""
 
 from __future__ import annotations
 
@@ -32,6 +32,17 @@ def copy_tree(src: Path, dst: Path) -> None:
 
 
 LAUNCHER = Path("bin") / "foreman"
+
+
+def check_platform(profile: str) -> None:
+    """Refuse to install foreman where it cannot run: it locks files with fcntl and manages POSIX process groups."""
+    if profile == "foreman" and sys.platform == "win32":
+        raise RuntimeError(
+            "foreman 只支持 macOS 和 Linux；Windows 上请在 WSL 里运行这个安装脚本。"
+            "旧版 dual-ai-collab 仍可用 --profile full 安装。\n"
+            "foreman runs on macOS and Linux only. On Windows, run this installer inside WSL; "
+            "the legacy skill still installs with --profile full."
+        )
 
 
 def skill_version(skill_dir: Path) -> str | None:
@@ -173,6 +184,7 @@ def main() -> None:
     replacing = (target_dir / "SKILL.md").is_file()
     previous = skill_version(target_dir)
     try:
+        check_platform(args.profile)
         if link:
             check_link(link)  # before copying, so a refused link leaves nothing half installed
         install(target_dir, source_root, force=args.force, profile=args.profile)

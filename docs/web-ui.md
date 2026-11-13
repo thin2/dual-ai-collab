@@ -12,6 +12,8 @@ python3 web_server.py 5001            # 端口可省略，默认 5001
 
 浏览器打开 http://localhost:5001 。服务只监听 `127.0.0.1`，其他机器访问不到。修改代码或升级后要重启服务再刷新页面。
 
+和 foreman 一样只支持 macOS 和 Linux；在 Windows 上要在 WSL 里运行。
+
 ## 项目
 
 页面顶部选择当前项目。

@@ -32,6 +32,8 @@ python3 install.py --profile foreman --bin-dir ~/.local/bin
 # 可通过 FACTORY_SKILLS 环境变量或 --target 自定义
 ```
 
+需要 Python 3.9 以上和 git，只支持 macOS 和 Linux。在 Windows 上命令和安装脚本会说明不支持后退出；要用的话在 WSL 里安装和运行。
+
 命令是技能目录下的 `bin/foreman`，下文都写作 `foreman`。
 
 - `--bin-dir` 指定的目录要在 `PATH` 里。安装脚本只创建一个链接，不修改 shell 配置；那里已经有别的 `foreman` 程序时会拒绝覆盖。

@@ -10,6 +10,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+# lib 用 fcntl 文件锁和 POSIX 进程组，在 Windows 上一导入就失败；先用一句话说清楚
+if sys.platform == "win32":
+    sys.exit("foreman 只支持 macOS 和 Linux；Windows 上请在 WSL 里安装和使用。\n"
+             "foreman runs on macOS and Linux only. On Windows, install and use it inside WSL.")
+
 # 技能根目录加入路径，才能以 lib 包的形式导入
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 

@@ -2,6 +2,7 @@
 name: foreman
 description: 需求规划、任务拆分、依赖分析、任务板维护、断点恢复和执行管理。适用于用户要求制定开发计划、建立或继续任务板；任务可以由当前会话直接实现，也可以派给用户选定模型的固定角色并行执行。一两步就能做完的修改、问答和代码讲解不使用本技能。
 version: 3.3.0
+compatibility: 需要 Python 3.9 以上和 git；只支持 macOS 和 Linux，Windows 上要在 WSL 里使用；派发给固定模型角色需要 Droid
 ---
 
 # Foreman：任务管理技能
@@ -582,5 +583,6 @@ Task 报 `Droid configuration not found` 时：
 - 历史记录只保存元数据，不保存完整日志
 - `add` 只检查编号、标题和状态；依赖和其余字段在规划审计和组队之后用 `validate` 检查
 - 当前会话直接执行时，文件范围靠自觉：没有沙箱和写入守卫，范围外的改动在 `inspect` 时才报告
-- 目前只适配 Droid：派发、`preflight` 和模型核对依赖 `droid exec` 和 Droid 的会话记录。规划、任务板和当前会话直接执行不依赖 Droid，但文件锁只支持 macOS 和 Linux
+- 目前只适配 Droid：派发、`preflight` 和模型核对依赖 `droid exec` 和 Droid 的会话记录。规划、任务板和当前会话直接执行不依赖 Droid
+- 只支持 macOS 和 Linux：文件锁和进程管理用的是 POSIX 接口。在 Windows 上命令会说明不支持后退出，要用的话在 WSL 里安装和运行
 - 仓库里旧的 dual-ai-collab 脚本（`skill/scripts`）也读写 `planning/tasks.json`，但它每次写入都会按自己的格式改写整个任务板，文件锁也和本技能不兼容。同一个任务板不要两边混用

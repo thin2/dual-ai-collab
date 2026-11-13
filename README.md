@@ -4,7 +4,9 @@
 
 ## Foreman（当前版本）
 
-**适用场景**：Factory Droid。规划、任务板和“当前会话直接执行”只用 Python 标准库和 git；派发给固定模型角色需要 Droid。其他 CLI 的适配还没有做。
+**适用场景**：Factory Droid，macOS 或 Linux。规划、任务板和“当前会话直接执行”只用 Python 标准库（3.9 以上）和 git；派发给固定模型角色需要 Droid。其他 CLI 的适配还没有做。
+
+不支持 Windows：文件锁和进程管理用的是 POSIX 接口，命令和安装脚本在 Windows 上会说明这一点后退出。要用的话在 WSL 里安装和运行。
 
 这个技能原名 `task-management`；原来的 `dual-ai-planning`（当前会话自己规划并实现的轻量技能）也已经并入，不再单独安装。
 
