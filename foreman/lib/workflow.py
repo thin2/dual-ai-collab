@@ -13,7 +13,7 @@ from pathlib import Path
 from .board import TaskBoard
 from .checkpoint import CheckpointError, CheckpointManager
 from .config import ExecutionConfig
-from .executor import TaskExecutor
+from .executor import CURRENT_SESSION, TaskExecutor, session_plan
 from .history import ExecutionHistory
 from .store import _file_lock, _file_scope
 from .team import audit_runs
@@ -192,7 +192,6 @@ def runtime_dependencies(task: dict) -> list[str]:
     return _path_list(task, "runtime_dependencies", "包含实际运行所需代码和配置模板")
 
 
-CURRENT_SESSION = "current-session"
 DISPATCH_OUTCOMES = {"returned", "permission_rejected", "failed", "interrupted"}
 DIRECT_OUTCOMES = {"completed", "failed", "interrupted"}
 
@@ -367,8 +366,7 @@ class Workflow:
             self.sync()
             plan["execution_id"] = execution_id
             if direct:
-                del plan["task_args"]
-                plan["droid"] = CURRENT_SESSION
+                session_plan(plan)
                 plan["instruction"] = (
                     "由当前会话直接实现，只修改 files 列出的路径。"
                     f"做完后运行 foreman execution finish {execution_id} --outcome completed，"
@@ -445,6 +443,10 @@ class Workflow:
             "instruction": "差异只说明文件变化，不证明是谁修改或是否完成。检查 diff 和新增文件后再决定。",
         }
         if record.status == "running":
+            # Nothing is concluded before finish, but the stray paths are already listed:
+            # a session taking over this run has to see them before it adds changes of its own.
+            report["undeclared"] = self._undeclared(record)
+            report["instruction"] += "还没有登记结束：undeclared 是当前的快照，finish 时会重新记录，notices 也在那之后才有。"
             return report
         undeclared = record.details.get("undeclared") or {"checked": False, "paths": [], "head_moved": False}
         notices = []
@@ -537,6 +539,7 @@ class Workflow:
             self.history._save_record(execution_id, record)
             self.board.update_task_status(task["id"], "AWAITING_INTEGRATION", reset_retries=True)
             self.sync()
+            return self.board.get_task(task["id"])
 
     def retry(self, execution_id: str, reason: str, block: bool = False):
         if not reason.strip():

@@ -14,6 +14,8 @@ try:
         ManagedTaskError,
         _normalize_task,
         _normalize_task_num,
+        dependency_ids,
+        dependency_satisfied,
         extract_acceptance_commands,
         find_task,
         open_tasks_sorted,
@@ -29,6 +31,8 @@ except ImportError:
         ManagedTaskError,
         _normalize_task,
         _normalize_task_num,
+        dependency_ids,
+        dependency_satisfied,
         extract_acceptance_commands,
         find_task,
         open_tasks_sorted,
@@ -211,8 +215,13 @@ class TaskBoard:
             sections.append("只修改上面列出的文件；需要改动其他文件时，停止并报告。")
             sections.append("")
 
-        if task.get("dependencies") and task.get("dependencies") != "无":
-            sections.extend(["## 依赖任务", f"依赖：{task['dependencies']}", "所有依赖任务已完成，可以开始实现。", ""])
+        dependencies = dependency_ids(task.get("dependencies"))
+        if dependencies:
+            tasks = self.get_all_tasks()
+            waiting = [f"#{dep}" for dep in dependencies if not dependency_satisfied(tasks, dep)]
+            sections.extend(["## 依赖任务", "依赖：" + ", ".join(f"#{dep}" for dep in dependencies),
+                             f"还没有集成确认：{'、'.join(waiting)}。依赖全部集成后这个任务才能开始。" if waiting
+                             else "所有依赖任务已完成，可以开始实现。", ""])
 
         return "\n".join(sections)
 

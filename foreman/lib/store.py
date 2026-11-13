@@ -275,9 +275,9 @@ def dependency_ids(deps) -> list[str]:
     if isinstance(deps, list):
         return deps
 
-    # 字符串格式：#001, #002
+    # 字符串格式：#001, #002。中文的逗号和顿号也算分隔符，任务编号里不会有它们
     ids = []
-    for part in str(deps).split(","):
+    for part in re.split("[,，、]", str(deps)):
         part = part.strip().lstrip("#")
         if part and part != "无":
             ids.append(part)

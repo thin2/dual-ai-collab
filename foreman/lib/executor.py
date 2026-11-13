@@ -14,6 +14,18 @@ except ImportError:
     from config import ExecutionConfig
 
 
+# 直接执行的任务不经过 droid：计划和执行记录的 droid 一栏写这个值
+CURRENT_SESSION = "current-session"
+
+
+def session_plan(plan: dict[str, Any]) -> dict[str, Any]:
+    """把直接执行任务的计划改成由当前会话完成：不选 droid，也不带 Task 调用参数。派发任务的计划不变。"""
+    if plan["mode"] == "direct":
+        plan["droid"] = CURRENT_SESSION
+        del plan["task_args"]
+    return plan
+
+
 class TaskExecutor:
     """任务执行器"""
 
@@ -78,10 +90,10 @@ class TaskExecutor:
         return self._plan(task)
 
     def plan_batch(self) -> dict[str, Any]:
-        """规划下一批可并行执行的任务"""
+        """规划下一批可并行执行的任务；只有派发的任务带 task_args"""
         selection = self.board.select_batch(self.config.get_roles(), self.config.get_max_parallel())
         return {
-            "batch": [self._plan(task) for task in selection["batch"]],
+            "batch": [session_plan(self._plan(task)) for task in selection["batch"]],
             "skipped": selection["skipped"],
             "max_parallel": selection["max_parallel"],
         }

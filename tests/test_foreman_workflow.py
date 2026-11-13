@@ -360,6 +360,9 @@ def test_cli_recovery_and_failure_reason(project):
     def cli(*args):
         return subprocess.run([sys.executable, str(SKILL / "tools/cli.py"), *args],
                               cwd=project, capture_output=True, text=True)
+    nothing = json.loads(cli("execution", "recover").stdout)
+    # With nothing to recover it says so, without the steps for a run that was cut short.
+    assert nothing["records"] == [] and "不需要恢复" in nothing["instruction"] and "finish" not in nothing["instruction"]
     started = cli("execution", "begin", "001")
     assert started.returncode == 0, started.stderr
     execution_id = json.loads(started.stdout)["execution_id"]
@@ -367,6 +370,7 @@ def test_cli_recovery_and_failure_reason(project):
     assert cli("execution", "finish", execution_id, "--outcome", "interrupted").returncode == 0
     recovered = json.loads(cli("execution", "recover").stdout)
     assert recovered["records"][0]["duration_seconds"] is None
+    assert "finish --outcome interrupted" in recovered["instruction"]
     assert cli("execution", "retry", execution_id, "--reason", "保留部分文件并补验证").returncode == 0
     assert TaskBoard.load(project).get_task("001")["last_failure"] == "保留部分文件并补验证"
 
@@ -709,6 +713,15 @@ def test_plan_check_passes_a_dispatchable_board(project):
     save_plan(project, plan_task("001"), plan_task("002", dependencies=["001"]))
     assert check_plan(project) == {"ok": True, "checked": ["001", "002"], "direct": [], "board": [], "team": []}
     Workflow(project).begin("001")
+
+
+@pytest.mark.parametrize("written", ["001, 002", "#001，#002", "001、002", ["001", "002"]])
+def test_dependencies_may_be_separated_the_way_chinese_text_separates_them(project, written):
+    save_plan(project, plan_task("001"), plan_task("002"), plan_task("003", dependencies=written))
+    # A full-width comma or 、 between two ids used to be read as one id that names no task.
+    assert check_plan(project)["ok"] is True
+    skipped = TaskBoard.load(project).select_batch({"frontend": {"model": "custom:proxy/claude"}}, 4)["skipped"]
+    assert skipped == [{"id": "003", "reason": "依赖未完成: #001, #002"}]
 
 
 @pytest.mark.parametrize(("field", "change"), [
@@ -1075,6 +1088,11 @@ def test_direct_execution_reports_stray_edits_and_integrates_through_the_cli(pro
     execution_id = json.loads(started.stdout)["execution_id"]
     (project / "page-001.txt").write_text("中文\n")
     (project / "stray.txt").write_text("顺手改的")
+    early = json.loads(cli("execution", "inspect", execution_id).stdout)
+    # Before finish it concludes nothing, but it already lists what lies outside the task's files:
+    # a session resuming this work has to see that before it adds changes of its own.
+    assert early["undeclared"]["paths"] == ["stray.txt"] and "notices" not in early
+    assert "还没有登记结束" in early["instruction"]
     assert cli("execution", "finish", execution_id, "--outcome", "returned").returncode == 1
     assert cli("execution", "finish", execution_id, "--outcome", "completed").returncode == 0
     report = json.loads(cli("execution", "inspect", execution_id).stdout)
@@ -1269,6 +1287,9 @@ def test_next_steps_lead_a_direct_task_through_the_cli_by_task_id(project):
     accepted = cli("execution", "accept", "001", "--evidence-file", "planning/acceptance-001.json")
     assert accepted.returncode == 0, accepted.stderr
     assert steps()[-1] == "foreman integrate 001 --commit <提交 SHA>"
+    # Accepting says where the task now stands and what comes next, in the words show uses.
+    assert "任务 001 → AWAITING_INTEGRATION" in accepted.stdout and steps()[-1] in accepted.stdout
+    assert "派发结果" not in accepted.stdout
     missing = cli("execution", "inspect", "002")
     assert missing.returncode == 1 and "找不到执行记录或任务 002" in missing.stderr
 
@@ -1292,6 +1313,36 @@ def test_next_steps_for_a_dispatched_task_follow_its_record(project, tmp_path):
     assert "foreman execution unblock 001 --reason" in steps()
     workflow.unblock(execution_id, "用户已恢复模型服务")
     assert "foreman run 001 --dispatcher <调度模型ID>" in steps()
+
+
+def test_show_says_whether_the_dependencies_of_a_task_are_integrated(project):
+    save_plan(project, plan_task("001"), plan_task("002", dependencies="001"),
+              plan_task("003", status="DONE", integration={"commit": "abc"}), plan_task("004", dependencies=["003"]))
+
+    def shown(task_id):
+        return subprocess.run([sys.executable, str(SKILL / "tools/cli.py"), "show", task_id],
+                              cwd=project, capture_output=True, text=True).stdout
+
+    waiting = shown("002")
+    # The task cannot start, and no part of what show prints may say that it can.
+    assert "暂时不能开始：依赖未完成: #001" in waiting
+    assert "还没有集成确认：#001" in waiting and "可以开始实现" not in waiting
+    assert "所有依赖任务已完成，可以开始实现。" in shown("004")
+
+
+def test_accepting_work_from_a_rejected_dispatch_says_the_outcome_is_kept(project, tmp_path):
+    workflow = Workflow(project)
+    execution_id = workflow.begin("001")["execution_id"]
+    (project / "page.txt").write_text("中文", encoding="utf-8")
+    workflow.finish(execution_id, "permission_rejected")
+    audited(workflow, execution_id, tmp_path)
+    (project / "planning" / "acceptance-001.json").write_text(json.dumps(evidence()), encoding="utf-8")
+    accepted = subprocess.run([sys.executable, str(SKILL / "tools/cli.py"), "execution", "accept", "001",
+                               "--evidence-file", "planning/acceptance-001.json"],
+                              cwd=project, capture_output=True, text=True)
+    assert accepted.returncode == 0, accepted.stderr
+    assert "任务 001 → AWAITING_INTEGRATION" in accepted.stdout
+    assert "派发结果仍记为 permission_rejected" in accepted.stdout
 
 
 def test_evidence_template_refuses_a_task_id_that_cannot_name_a_file(project):

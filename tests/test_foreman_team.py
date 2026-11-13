@@ -352,7 +352,10 @@ class TestCli(TeamTestCase):
         batch = self.run_cli("batch", "--json")
         self.assertEqual(batch.returncode, 0, batch.stderr)
         plan = json.loads(batch.stdout)
-        self.assertEqual([p["task_args"]["subagent_type"] for p in plan["batch"]], ["tm-frontend", "worker"])
+        self.assertEqual([(p["mode"], p["droid"]) for p in plan["batch"]],
+                         [("dispatch", "tm-frontend"), ("direct", "current-session")])
+        # Task arguments exist only for the task a sub-agent will do; the session does the other one itself.
+        self.assertEqual(["task_args" in p for p in plan["batch"]], [True, False])
 
         failed = self.run_cli("fail", "001", "--block", "--reason", "模型服务不可用")
         self.assertEqual(failed.returncode, 0, failed.stderr)

@@ -645,8 +645,16 @@ def cmd_execution(args):
         if result["status"] not in {"passed", "not_applicable"}:
             sys.exit(2)
     elif args.action == "accept":
-        workflow.accept(args.id, _read_json(args.root, args.evidence_file, "验收证据文件"))
-        print("验收已记录；执行结果保持不变")
+        task = workflow.accept(args.id, _read_json(args.root, args.evidence_file, "验收证据文件"))
+        record = workflow.current_record(task)
+        print(f"验收已记录：任务 {task['id']} → {task['status']}")
+        outcome = record.details["dispatch_outcome"]
+        if outcome not in {"returned", "completed"}:
+            # 验收看的是现有文件；这次执行是怎么结束的，仍按原样留在记录里
+            print(f"{'执行' if is_direct(record) else '派发'}结果仍记为 {outcome}，不因验收通过而改写")
+        print("下一步:")
+        for step in _next_steps(workflow, task):
+            print(f"  {step}")
     elif args.action in {"retry", "block"}:
         workflow.retry(args.id, args.reason, args.action == "block")
         print("检查结论和续做原因已保存，原有文件保留")
@@ -660,12 +668,15 @@ def cmd_execution(args):
                    for record in workflow.history.get_all_history()
                    if record.details.get("managed") and not record.details.get("integration")]
         _warn_unreadable(workflow.history)
-        _print_json({"records": records, "instruction":
-                    "先确认子进程已结束；running 不代表仍存活。未知结束时间用 finish --outcome interrupted。"
-                    "再 inspect，审查文件后 accept、retry 或 block。不要自动重跑。"
-                    "details.mode 为 direct 的记录是当前会话直接执行的：仍是 running 时检查已有改动后接着做，"
-                    "做完用 finish --outcome completed。"
-                    "current 为 false 的记录已被后续派发替代或未登记到任务板，仅供查阅。"})
+        if records or workflow.history.unreadable:
+            instruction = ("先确认子进程已结束；running 不代表仍存活。未知结束时间用 finish --outcome interrupted。"
+                           "再 inspect，审查文件后 accept、retry 或 block。不要自动重跑。"
+                           "details.mode 为 direct 的记录是当前会话直接执行的：仍是 running 时检查已有改动后接着做，"
+                           "做完用 finish --outcome completed。"
+                           "current 为 false 的记录已被后续派发替代或未登记到任务板，仅供查阅。")
+        else:
+            instruction = f"没有尚未集成的执行记录，不需要恢复。任务板的状态用 {CLI} show 查看。"
+        _print_json({"records": records, "instruction": instruction})
     elif args.action == "sync":
         workflow.sync()
         if not workflow.checkpoint_set_aside:
@@ -734,7 +745,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true", help="输出 JSON（含 task_args）")
 
     p = subparsers.add_parser("batch", help="规划下一批可并行执行的任务")
-    p.add_argument("--json", action="store_true", help="输出 JSON（含每个任务的 task_args）")
+    p.add_argument("--json", action="store_true", help="输出 JSON（派发的任务含 task_args）")
 
     p = subparsers.add_parser("validate", help="规划检查：缺字段、依赖不存在或成环、角色未配置；有问题时退出码 1")
     p.add_argument("--json", action="store_true", help="JSON 输出")
