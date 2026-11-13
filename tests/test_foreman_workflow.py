@@ -313,7 +313,9 @@ def test_guard_checks_paths_not_document_body(project):
 
 
 def git(root, *args):
-    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=True)
+    # With an identity of its own: a CI runner has none configured, and git then refuses to commit.
+    identity = ["-c", "user.name=Test", "-c", "user.email=test@example.invalid"]
+    return subprocess.run(["git", "-C", str(root), *identity, *args], capture_output=True, text=True, check=True)
 
 
 def test_delivery_catches_uncommitted_runtime_dependency_and_deletion(project):
