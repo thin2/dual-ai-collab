@@ -2,6 +2,27 @@
 
 target-version = "py39"
 
+# The legacy skill is frozen and not linted: its scripts, and the tests and fixture that exist only for them.
+extend-exclude = [
+    "skill/scripts",
+    "tests/fixtures/fake_app_server.py",
+    "tests/test_adapter_backend.py",
+    "tests/test_adapter_protocols.py",
+    "tests/test_config.py",
+    "tests/test_error_handling.py",
+    "tests/test_execution_flow.py",
+    "tests/test_planning_integration.py",
+    "tests/test_run_improvements.py",
+    "tests/test_run_store_pytest.py",
+    "tests/test_run_task_pytest.py",
+    "tests/test_session_backend.py",
+    "tests/test_structured_logging.py",
+    "tests/test_task_board.py",
+    "tests/test_task_manager_pytest.py",
+    "tests/test_tasks_store_pytest.py",
+    "tests/test_verify_cli_pytest.py",
+]
+
 [lint]
 select = [
     "E",   # pycodestyle errors

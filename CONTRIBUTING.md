@@ -56,7 +56,7 @@ ruff check --fix .    # 修复可以自动修复的问题
 python -m compileall -q skill/scripts foreman web_server.py web_projects.py install.py
 ```
 
-`foreman/`、`web_server.py`、`web_projects.py`、`install.py` 和它们的测试要保持没有 lint 发现。旧版 `skill/` 和它的测试里还有没清理的发现，新改动不要再增加。
+`ruff check .` 要没有发现，CI 的 `lint` 任务跑的就是它。旧版的 `skill/scripts` 和只为它存在的测试不在检查范围内，名单在 `ruff.toml` 的 `extend-exclude` 里。新加的文件默认都会被检查，不要为了通过检查把文件加进名单。
 
 ## 提交规范
 
