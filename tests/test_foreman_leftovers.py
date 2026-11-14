@@ -34,7 +34,8 @@ LOOKS = [
     "status", "select", "batch", "batch --json", "validate", "validate --json", "plan-execution 001",
     "plan-execution 001 --json", "acceptance 001", "history", "history --task-id 001", "execution recover",
     "execution inspect 001", "checkpoint check", "config show", "models", "team show", "team show --json",
-    "team check", "team audit", "team remove nobody", "delivery --paths a.txt",
+    "team check", "team audit", "team remove nobody", "delivery --paths a.txt", "web", "web status", "web --json",
+    "web stop",
 ]
 # Refused wherever they are run: there is no task 999, and the rest is input no project accepts.
 REFUSED = [
@@ -45,9 +46,13 @@ REFUSED = [
     "preflight --dispatcher no-such-model", "execution begin 999", "execution finish 999 --outcome completed",
     "execution inspect 999", "execution audit 999", "execution accept 999 --evidence-file nowhere.json",
     "execution retry 999 --reason x", "execution block 999 --reason x", "execution unblock 999 --reason x",
+    "execution pause 999 --reason x", "execution track 999 --pid 1 --label x", "integrate 999 --no-git --note x",
+    "integrate 001", "integrate 001 --commit HEAD --no-git", "web restart",
 ]
 # Refused once task 001 is on the board but has not been started.
-NOT_STARTED = ["add --file plan.json", "execution finish 001 --outcome completed", "execution retry 001 --reason x"]
+NOT_STARTED = ["add --file plan.json", "execution finish 001 --outcome completed", "execution retry 001 --reason x",
+               "execution pause 001 --reason x", "execution track 001 --pid 1 --label x",
+               "integrate 001 --no-git --note x"]
 # Refused by the board once task 001 is in progress.
 MANAGED = ["add --file plan.json", "update 001 DONE", "fail 001"]
 # Refused by the workflow while task 001 is in progress. It takes its lock before it can tell,
@@ -55,6 +60,7 @@ MANAGED = ["add --file plan.json", "update 001 DONE", "fail 001"]
 IN_PROGRESS = [
     "execution begin 001", "execution finish 001 --outcome returned", "execution accept 001 --evidence-file bad.json",
     "execution retry 001 --reason x", "execution unblock 001 --reason x", "integrate 001 --commit HEAD",
+    "execution pause 001 --reason x", "integrate 001 --no-git --note x",
 ]
 
 

@@ -6,10 +6,13 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 import re
 import shlex
+import socket
 import subprocess
 import sys
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -160,6 +163,18 @@ def test_links_between_documents_point_at_files_that_exist():
     assert not broken
 
 
+def test_interview_reference_covers_the_documents_the_skill_file_tells_the_agent_to_write():
+    # SKILL.md only names the glossary and the decision records; how to write them is in the reference.
+    body = skill_body()
+    guide = (SKILL / "references" / "interview.md").read_text(encoding="utf-8")
+    for name in ("planning/GLOSSARY.md", "planning/adr/"):
+        assert name in body and name in guide
+    for section in ("决策树", "怎么提问", "什么时候结束", "术语表", "决策记录"):
+        assert f"\n## {section}\n" in guide
+    # Both say the same thing about a round: everything that can be asked now, nothing that depends on it.
+    assert "每轮问完当前能问的全部问题" in body and "每一轮把整个前沿问完" in guide
+
+
 def task(task_id, **fields):
     return {"id": task_id, "title": "页面", "description": "实现页面", "files": [f"page-{task_id}.txt"],
             "runtime_dependencies": [f"page-{task_id}.txt"],
@@ -240,6 +255,83 @@ def test_doctor_requires_the_dispatch_tools_once_a_task_names_a_role(project):
         assert f"[问题] {name}: " in checked.stdout
     assert "未完成的任务要派给角色 backend" in checked.stdout
 
+
+def test_doctor_reports_the_web_board_and_a_project_without_git_as_notes_at_most(project):
+    checked = cli(project, "doctor", "--json")
+    items = {item["name"]: item for item in json.loads(checked.stdout)["items"]}
+    assert checked.returncode == 0 and items["看板"]["level"] in {"ok", "note"}
+    assert items["项目"]["level"] == "note" and "integrate <任务ID> --no-git" in items["项目"]["detail"]
+    subprocess.run(["git", "-C", str(project), "init", "-q"], check=True)
+    assert f"[正常] 项目: {project.resolve()}\n" in cli(project, "doctor").stdout
+
+
+def free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+def test_web_board_is_not_started_where_there_is_no_project(tmp_path):
+    (tmp_path / "home").mkdir()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    refused = cli(elsewhere, "web", "start")
+    assert refused.returncode == 1 and "没有任务板或配置" in refused.stderr and "foreman init" in refused.stderr
+    looked = cli(elsewhere, "web", "--json")
+    assert looked.returncode == 0 and json.loads(looked.stdout)["listed"] is False
+    assert cli(elsewhere, "web", "stop").returncode == 0
+    assert list(elsewhere.iterdir()) == []
+    bad_port = subprocess.run([sys.executable, str(SKILL / "tools" / "cli.py"), "web"], cwd=elsewhere, text=True,
+                              capture_output=True, env={"PATH": "/usr/bin:/bin", "FOREMAN_WEB_PORT": "http"})
+    assert bad_port.returncode == 1 and "FOREMAN_WEB_PORT" in bad_port.stderr
+
+
+def test_installed_copy_starts_its_own_web_board_and_stops_it(tmp_path):
+    pytest.importorskip("flask")
+    target = tmp_path / "skill"
+    installed = subprocess.run([sys.executable, str(ROOT / "install.py"), "--profile", "foreman", "--source", str(ROOT),
+                                "--target", str(target)], capture_output=True, text=True)
+    assert installed.returncode == 0, installed.stderr
+    for name in ("web_server.py", "web_projects.py", "templates/overview.html", "static"):
+        assert (target / "web" / name).exists(), name
+    # The user's own HOME: Flask may be installed for the user only. The port keeps their board out of it.
+    env = {**os.environ, "FOREMAN_WEB_PORT": str(free_port())}
+
+    def run(root, *args):
+        return subprocess.run([sys.executable, str(target / "tools" / "cli.py"), *args], cwd=root, capture_output=True,
+                              text=True, env=env, timeout=60)
+
+    first, second = tmp_path / "first", tmp_path / "second"
+    for root in (first, second):
+        root.mkdir()
+        assert run(root, "init").returncode == 0
+    assert json.loads(run(first, "web", "--json").stdout)["running"] is False
+    started = run(first, "web", "start")
+    try:
+        assert started.returncode == 0 and "看板已启动: http://localhost:" in started.stdout, started.stderr
+        board = json.loads(run(first, "web", "--json").stdout)
+        assert board["listed"] and board["url"] in started.stdout and board["url"].endswith("/overview")
+        page = urllib.request.build_opener(urllib.request.ProxyHandler({})).open(
+            f"http://127.0.0.1:{board['port']}/overview", timeout=10)
+        assert page.status == 200
+        assert f"[正常] 看板: 正在运行：{board['url']}" in run(first, "doctor").stdout
+        # Asked again it answers with the board that is up, and another project joins it.
+        again = run(first, "web", "start")
+        assert again.returncode == 0 and f"看板已在运行: {board['url']}" in again.stdout
+        joined = run(second, "web", "start")
+        assert joined.returncode == 0 and "登记进去" in joined.stdout, joined.stderr
+        other = json.loads(run(second, "web", "--json").stdout)
+        assert other["listed"] and other["port"] == board["port"] and "/project/" in other["url"]
+        # Only the project that started it can stop it.
+        left = run(second, "web", "stop")
+        assert left.returncode == 0 and "别处启动的" in left.stdout
+        assert json.loads(run(first, "web", "--json").stdout)["listed"] is True
+    finally:
+        stopped = run(first, "web", "stop")
+    assert stopped.returncode == 0 and "看板已关闭" in stopped.stdout, stopped.stdout + stopped.stderr
+    assert json.loads(run(first, "web", "--json").stdout)["running"] is False
+    assert not (first / ".task-management" / "web.json").exists()
+    assert not (target / "planning").exists() and not (target / ".task-management").exists()
 
 def test_add_lists_what_the_tasks_it_wrote_still_lack(project):
     added = add(project, "thin.json", {"id": "003", "title": "只有标题", "dependencies": ["009"]})

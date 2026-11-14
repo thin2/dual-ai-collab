@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -457,6 +459,10 @@ def test_runner_timeout_kills_owned_process_and_records_end(project):
     record = ExecutionHistory(project)._load_record(result["execution_id"])
     assert record.details["dispatch_outcome"] == "interrupted"
     assert record.end_time and record.duration_seconds is not None
+    # Told apart from a stop the user asked for, which costs no retry.
+    assert record.details["transport"]["timed_out"] is True
+    with pytest.raises(ValueError, match="超时终止"):
+        Workflow(project).pause(result["execution_id"], "用户叫停")
 
 
 def test_installed_profile_contains_managed_entrypoints(tmp_path):
@@ -711,8 +717,52 @@ def save_plan(project, *tasks):
 
 def test_plan_check_passes_a_dispatchable_board(project):
     save_plan(project, plan_task("001"), plan_task("002", dependencies=["001"]))
-    assert check_plan(project) == {"ok": True, "checked": ["001", "002"], "direct": [], "board": [], "team": []}
+    assert check_plan(project) == {"ok": True, "checked": ["001", "002"], "direct": [], "board": [], "team": [],
+                                   "warnings": []}
     Workflow(project).begin("001")
+
+
+def test_plan_check_warns_about_tasks_too_large_to_accept_in_one_piece(project):
+    crowded = {"id": "all", "scenario": "走一遍购买流程", "method": "manual",
+               "expected": "列表显示商品；点击后进入详情；返回后保留滚动位置"}
+    save_plan(project, plan_task("001", estimated_hours=2.5),
+              plan_task("002", estimated_hours=6),
+              plan_task("003", files=[f"src/module_{number}.py" for number in range(19)]),
+              plan_task("004", files=["web/src/App.tsx", "ios/App/Bridge.swift"]),
+              plan_task("005", acceptance=[crowded]),
+              # Splitting a task is a planning decision; one that has started is past it.
+              plan_task("006", estimated_hours=9, status="AWAITING_REVIEW"))
+    report = check_plan(project)
+    assert [(item["task"], item["field"]) for item in report["warnings"]] == [
+        ("002", "estimated_hours"), ("003", "files"), ("004", "files"), ("005", "acceptance")]
+    assert "19 项" in report["warnings"][1]["problem"]
+    assert "Web 前端（web/src/App.tsx）、iOS 原生（ios/App/Bridge.swift）" in report["warnings"][2]["problem"]
+    assert "all 的 expected 写了 3 个结果" in report["warnings"][3]["problem"]
+    # They are advice: the plan still passes and every one of these tasks can be started.
+    assert report["ok"] is True and report["board"] == []
+
+    def cli(*args):
+        return subprocess.run([sys.executable, str(SKILL / "tools/cli.py"), *args],
+                              cwd=project, capture_output=True, text=True)
+
+    checked = cli("validate")
+    assert checked.returncode == 0, checked.stdout + checked.stderr
+    assert "任务粒度提醒 4 个" in checked.stdout and "规划检查通过" in checked.stdout
+    assert json.loads(cli("validate", "--json").stdout)["warnings"] == report["warnings"]
+    (project / "more.json").write_text(json.dumps(plan_task("007", estimated_hours=5)), encoding="utf-8")
+    added = cli("add", "--file", "more.json")
+    assert added.returncode == 0 and "任务粒度提醒 1 处" in added.stdout and "007 estimated_hours" in added.stdout
+    Workflow(project).begin("002")
+
+
+@pytest.mark.parametrize(("expected", "count"), [
+    ("返回 401", 1), ("3.5 秒内返回 2.0 版本的列表", 1), ("页面及空态为中文；刷新后不变", 2),
+    ("1. 显示列表 2. 点击进入详情 3. 返回保留位置", 3), ("（1）登录成功（2）跳转首页（3）显示昵称", 3),
+    ("显示列表\n点击进入详情\n返回保留位置\n下拉刷新", 4),
+])
+def test_results_listed_in_one_acceptance_condition_are_counted(expected, count):
+    from lib.plan import _results
+    assert _results(expected) == count
 
 
 @pytest.mark.parametrize("written", ["001, 002", "#001，#002", "001、002", ["001", "002"]])
@@ -839,6 +889,8 @@ def test_changes_outside_declared_files_are_reported_and_must_be_explained(proje
     (project / "__pycache__").mkdir()
     (project / "__pycache__" / "page.pyc").write_text("cache")
     (project / "planning" / "acceptance-002.json").write_text("{}")  # The main agent's own notes.
+    (project / "planning" / "adr").mkdir()
+    (project / "planning" / "adr" / "0001-copy.md").write_text("# 文案用中文\n")  # Written during the interview.
     workflow.finish(execution_id, "returned")
     report = workflow.inspect(execution_id)
     assert report["added"] == ["page.txt"]
@@ -1021,7 +1073,8 @@ def direct_project(project, **fields):
 
 def test_task_without_role_is_done_by_the_current_session_under_the_same_gates(project):
     workflow = direct_project(project)
-    assert check_plan(project) == {"ok": True, "checked": ["001"], "direct": ["001"], "board": [], "team": []}
+    assert check_plan(project) == {"ok": True, "checked": ["001"], "direct": ["001"], "board": [], "team": [],
+                                   "warnings": []}
     plan = workflow.begin("001")
     execution_id = plan["execution_id"]
     assert plan["mode"] == "direct" and "task_args" not in plan and execution_id in plan["instruction"]
@@ -1275,9 +1328,12 @@ def test_next_steps_lead_a_direct_task_through_the_cli_by_task_id(project):
     made = cli("acceptance", "001", "--template")
     assert made.returncode == 0 and "stray.txt" in made.stdout
     proof = project / "planning" / "acceptance-001.json"
-    assert json.loads(proof.read_text(encoding="utf-8")) == {"inspection": "", "undeclared": "", "checks": [{
-        "id": "copy", "status": "", "evidence": "", "scenario": "打开页面", "expected": "显示中文",
-        "method": "manual"}]}
+    execution_id = TaskBoard.load(project).get_task("001")["execution_id"]
+    # The template names the run it is for, so evidence cannot be carried over to another one.
+    assert json.loads(proof.read_text(encoding="utf-8")) == {
+        "execution_id": execution_id, "inspection": "", "undeclared": "", "checks": [{
+            "id": "copy", "status": "", "evidence": "", "scenario": "打开页面", "expected": "显示中文",
+            "method": "manual"}]}
     # Submitted unfilled, the template is refused instead of being recorded as a pass.
     refused = cli("execution", "accept", "001", "--evidence-file", "planning/acceptance-001.json")
     assert refused.returncode == 1 and "审查结论" in refused.stderr
@@ -1352,3 +1408,220 @@ def test_evidence_template_refuses_a_task_id_that_cannot_name_a_file(project):
                           cwd=project, capture_output=True, text=True)
     assert made.returncode == 1 and "不能用作文件名" in made.stderr
     assert not (project / "escape.json").exists() and not (project / "planning" / "acceptance-..").exists()
+
+
+def test_run_the_user_stopped_goes_back_to_pending_without_costing_a_retry(project):
+    workflow = direct_project(project)
+    limit = ExecutionConfig(project).get_max_retries()
+    first = workflow.begin("001")["execution_id"]
+    with pytest.raises(ValueError, match="finish 001 --outcome interrupted"):
+        workflow.pause(first, "用户叫停")
+    workflow.finish(first, "failed")
+    # What went wrong on its own is a failed attempt, however it is described afterwards.
+    with pytest.raises(ValueError, match="不是用户叫停"):
+        workflow.pause(first, "用户叫停")
+    workflow.retry(first, "写了一半")
+    assert workflow.board.get_task("001")["failed_attempts"] == 1
+    # Stopped more often than the retry limit allows failures, and still not blocked.
+    for _ in range(limit + 2):
+        execution_id = workflow.begin("001")["execution_id"]
+        (project / "page-001.txt").write_text("列表已完成")
+        workflow.finish(execution_id, "interrupted")
+        with pytest.raises(ValueError, match="必须说明"):
+            workflow.pause(execution_id, "  ")
+        workflow.pause(execution_id, "用户要先确认设计稿；列表已完成，详情页没动")
+        task = workflow.board.get_task("001")
+        assert (task["status"], task["failed_attempts"]) == ("PENDING", 1)
+        with pytest.raises(ValueError, match="现在是 PENDING"):
+            workflow.pause(execution_id, "再停一次")
+    record = workflow.history._load_record(execution_id)
+    assert record.details["recovery"]["paused"] is True
+    assert record.details["recovery"]["inspection"]["baseline_files"] == ["page-001.txt"]
+    resumed = workflow.begin("001")
+    assert "用户叫停（不计失败次数）：用户要先确认设计稿" in resumed["context"]
+    assert (project / "page-001.txt").read_text() == "列表已完成"
+
+
+def test_dispatch_that_timed_out_is_not_a_stop_the_user_asked_for(project):
+    workflow = Workflow(project)
+    execution_id = workflow.begin("001")["execution_id"]
+    workflow.finish(execution_id, "interrupted", transport={"timed_out": True})
+    with pytest.raises(ValueError, match="超时终止"):
+        workflow.pause(execution_id, "用户叫停")
+    assert workflow.board.get_task("001")["status"] == "AWAITING_REVIEW"
+
+
+def test_pausing_through_the_cli_says_how_to_resume(project):
+    direct_project(project)
+
+    def cli(*args):
+        return subprocess.run([sys.executable, str(SKILL / "tools/cli.py"), *args],
+                              cwd=project, capture_output=True, text=True)
+
+    assert cli("execution", "begin", "001").returncode == 0
+    assert cli("execution", "finish", "001", "--outcome", "interrupted").returncode == 0
+    assert "foreman execution pause 001 --reason" in cli("show", "001").stdout
+    assert "pause" in json.loads(cli("execution", "recover").stdout)["instruction"]
+    paused = cli("execution", "pause", "001", "--reason", "用户改主意，先做 002")
+    assert paused.returncode == 0, paused.stderr
+    assert "不计失败次数（仍是 0 次）" in paused.stdout and "foreman execution begin 001" in paused.stdout
+    assert "foreman execution begin 001" in cli("show", "001").stdout
+    # A run that failed is offered retry only.
+    assert cli("execution", "begin", "001").returncode == 0
+    assert cli("execution", "finish", "001", "--outcome", "failed").returncode == 0
+    assert "execution pause" not in cli("show", "001").stdout
+
+
+def test_project_without_git_integrates_on_the_content_that_was_accepted(project):
+    save_plan(project, {key: value for key, value in plan_task("001").items() if key != "role"},
+              plan_task("002", dependencies=["001"]))
+    workflow = Workflow(project)
+    execution_id = workflow.begin("001")["execution_id"]
+    (project / "page-001.txt").write_text("中文")
+    workflow.finish(execution_id, "completed")
+    workflow.accept(execution_id, evidence())
+    roles = ExecutionConfig(project).get_roles()
+    assert workflow.board.select_batch(roles, 2)["batch"] == []  # 002 waits for 001 to be integrated
+
+    def cli(*args):
+        return subprocess.run([sys.executable, str(SKILL / "tools/cli.py"), *args],
+                              cwd=project, capture_output=True, text=True)
+
+    steps = cli("show", "001").stdout.split("## 下一步", 1)[1]
+    assert "foreman integrate 001 --no-git --note" in steps and "--commit" not in steps
+    assert cli("integrate", "001").returncode == 2  # neither a commit nor --no-git
+    missing_note = cli("integrate", "001", "--no-git")
+    assert missing_note.returncode == 1 and "--note" in missing_note.stderr
+    (project / "page-001.txt").write_text("验收后又改了")
+    changed = cli("integrate", "001", "--no-git", "--note", "已备份")
+    assert changed.returncode == 1 and "验收后文件已变化" in changed.stderr
+    (project / "page-001.txt").write_text("中文")
+    done = cli("integrate", "001", "--no-git", "--note", "成果在 ~/backup/2026-11-14.zip")
+    assert done.returncode == 0 and "没有提交" in done.stdout, done.stderr
+    task = workflow.board.get_task("001")
+    assert task["status"] == "DONE" and task["integration"]["commit"] is None
+    assert task["integration"]["mode"] == "no-git" and len(task["integration"]["digest"]) == 64
+    assert task["integration"]["note"] == "成果在 ~/backup/2026-11-14.zip"
+    recorded = workflow.history._load_record(execution_id).details["integration"]
+    assert recorded["digest"] == task["integration"]["digest"] and recorded["commit"] is None
+    assert [item["id"] for item in workflow.board.select_batch(roles, 2)["batch"]] == ["002"]
+    assert cli("integrate", "001", "--no-git", "--note", "重复执行").returncode == 0
+    assert workflow.board.get_task("001")["integration"]["note"] == "成果在 ~/backup/2026-11-14.zip"
+    with pytest.raises(ValueError, match="已按内容快照集成"):
+        workflow.integrate("001", "0" * 40, project, "")
+    assert json.loads(cli("execution", "recover").stdout)["records"] == []
+    assert "已集成，不需要操作" in cli("show", "001").stdout
+
+
+def test_project_under_git_cannot_skip_the_commit(project):
+    git_project(project)
+    workflow = direct_project(project)
+    execution_id = workflow.begin("001")["execution_id"]
+    (project / "page-001.txt").write_text("中文")
+    workflow.finish(execution_id, "completed")
+    workflow.accept(execution_id, evidence())
+    with pytest.raises(ValueError, match="在 git 仓库里.*--commit"):
+        workflow.integrate("001", None, project, "不想提交")
+    assert workflow.board.get_task("001")["status"] == "AWAITING_INTEGRATION"
+
+
+def test_evidence_belongs_to_the_run_it_was_gathered_for(project):
+    direct_project(project)
+
+    def cli(*args):
+        return subprocess.run([sys.executable, str(SKILL / "tools/cli.py"), *args],
+                              cwd=project, capture_output=True, text=True)
+
+    proof = project / "planning" / "acceptance-001.json"
+
+    def fill():
+        content = json.loads(proof.read_text(encoding="utf-8"))
+        content.update(inspection="看过 page-001.txt")
+        content["checks"][0].update(status="passed", evidence="打开页面看到中文")
+        proof.write_text(json.dumps(content, ensure_ascii=False), encoding="utf-8")
+        return content
+
+    first = json.loads(cli("execution", "begin", "001").stdout)["execution_id"]
+    early = cli("acceptance", "001", "--template")
+    # Asked for before the run has ended, the template says that evidence filled in now will not count.
+    assert early.returncode == 0 and "execution finish 之后" in early.stderr
+    assert fill()["execution_id"] == first
+    (project / "page-001.txt").write_text("中文")
+    assert cli("execution", "finish", "001", "--outcome", "completed").returncode == 0
+    finished = Workflow(project).history._load_record(first).recorded_at
+    stale = datetime.fromisoformat(finished).timestamp() - 60
+    os.utime(proof, (stale, stale))
+    refused = cli("execution", "accept", "001", "--evidence-file", "planning/acceptance-001.json")
+    assert refused.returncode == 1 and "登记结束之前" in refused.stderr and "--template --force" in refused.stderr
+    assert TaskBoard.load(project).get_task("001")["status"] == "AWAITING_REVIEW"
+
+    assert cli("execution", "retry", "001", "--reason", "文案不对，重做").returncode == 0
+    second = json.loads(cli("execution", "begin", "001").stdout)["execution_id"]
+    (project / "page-001.txt").write_text("中文，改过")
+    assert cli("execution", "finish", "001", "--outcome", "completed").returncode == 0
+    # Rewritten after this run ended, but still the evidence of the run before it.
+    fill()
+    carried = cli("execution", "accept", "001", "--evidence-file", "planning/acceptance-001.json")
+    assert carried.returncode == 1 and f"是为执行 {first} 写的" in carried.stderr and second in carried.stderr
+    made = cli("acceptance", "001", "--template", "--force")
+    assert made.returncode == 0 and second in made.stdout and made.stderr == ""
+    assert fill()["execution_id"] == second
+    accepted = cli("execution", "accept", "001", "--evidence-file", "planning/acceptance-001.json")
+    assert accepted.returncode == 0, accepted.stderr
+
+
+def test_checkpoint_marks_what_was_saved_by_hand_before_later_execution_events(project):
+    direct_project(project)
+
+    def cli(*args):
+        return subprocess.run([sys.executable, str(SKILL / "tools/cli.py"), *args],
+                              cwd=project, capture_output=True, text=True)
+
+    def marked():
+        return [line.split(":", 1)[0] for line in cli("checkpoint", "check").stdout.splitlines() if "可能已过期" in line]
+
+    assert cli("checkpoint", "save", "--phase", "developing", "--data", "spec_file=planning/specs/a.md",
+               "next_action=先做 001 的列表", "current_task=009").returncode == 0
+    assert marked() == []
+    assert cli("execution", "begin", "001").returncode == 0
+    shown = cli("checkpoint", "check").stdout
+    # The note was true when it was written; the path of the spec stays true, and progress comes from the board.
+    assert marked() == ["next_action"]
+    assert "spec_file: planning/specs/a.md\n" in shown and "current_task: 001\n" in shown
+    assert "foreman show" in shown
+    assert cli("execution", "sync").returncode == 0  # repairing the checkpoint is not an execution event
+    assert marked() == ["next_action"]
+    assert cli("checkpoint", "save", "--phase", "developing", "--data", "next_action=验收 001").returncode == 0
+    assert marked() == []
+    assert cli("execution", "finish", "001", "--outcome", "completed").returncode == 0
+    assert marked() == ["next_action"]
+
+
+def test_processes_noted_for_a_run_are_reported_while_they_are_still_alive(project):
+    direct_project(project)
+
+    def cli(*args):
+        return subprocess.run([sys.executable, str(SKILL / "tools/cli.py"), *args],
+                              cwd=project, capture_output=True, text=True)
+
+    assert cli("execution", "begin", "001").returncode == 0
+    server = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+    try:
+        label = "dev server，端口 5173"
+        noted = cli("execution", "track", "001", "--pid", str(server.pid), "--label", label)
+        assert noted.returncode == 0, noted.stderr
+        assert cli("execution", "track", "001", "--pid", str(server.pid), "--label", label).returncode == 0
+        (project / "page-001.txt").write_text("中文")
+        finished = cli("execution", "finish", "001", "--outcome", "completed")
+        assert finished.returncode == 0 and json.loads(finished.stdout)["status"] == "success"
+        assert f"{label}（PID {server.pid}）" in finished.stderr and "还在运行" in finished.stderr
+        assert json.loads(cli("execution", "inspect", "001").stdout)["processes"] == [
+            {"pid": server.pid, "label": label, "running": True}]
+    finally:
+        server.kill()
+        server.wait()
+    assert json.loads(cli("execution", "inspect", "001").stdout)["processes"][0]["running"] is False
+    quiet = cli("execution", "retry", "001", "--reason", "换个写法")
+    assert quiet.returncode == 0 and "还在运行" not in quiet.stderr
+    gone = cli("execution", "track", "001", "--pid", str(server.pid), "--label", "已经退出的进程")
+    assert gone.returncode == 1 and f"没有 PID 为 {server.pid} 的进程" in gone.stderr

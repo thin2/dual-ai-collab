@@ -37,6 +37,23 @@ def copy_tree(src: Path, dst: Path) -> list[str]:
 
 
 LAUNCHER = Path("bin") / "foreman"
+# The web board lives at the repository root; an installed skill carries it in web/ so foreman web can start it.
+WEB_FILES = ("web_server.py", "web_projects.py", "templates", "static")
+
+
+def copy_web(source_root: Path, target_dir: Path) -> list[str]:
+    """Copy the web board into target_dir/web; return the files copied, relative to target_dir."""
+    if not all((source_root / name).exists() for name in WEB_FILES):
+        return []
+    copied = []
+    for name in WEB_FILES:
+        source = source_root / name
+        if source.is_dir():
+            copied += [f"web/{name}/{path}" for path in copy_tree(source, target_dir / "web" / name)]
+        else:
+            copy_file(source, target_dir / "web" / name)
+            copied.append(f"web/{name}")
+    return copied
 # The files an install put in the skill folder, so the next install can tell its own leftovers from other files.
 MANIFEST = ".install-manifest.json"
 
@@ -169,7 +186,8 @@ def install(target_dir: Path, source_root: Path, force: bool, profile: str = "fu
             raise RuntimeError(f"目标目录已存在且非空: {target_dir}；覆盖需 --force")
         replacing = (target_dir / "SKILL.md").is_file()
         recorded = recorded_files(target_dir)
-        files = sorted(name for name in copy_tree(source, target_dir) if name != MANIFEST)
+        files = sorted([name for name in copy_tree(source, target_dir) if name != MANIFEST]
+                       + copy_web(source_root, target_dir))
         # The source may come from an archive or a filesystem that dropped the mode bits.
         (target_dir / LAUNCHER).chmod(0o755)
         notes = []

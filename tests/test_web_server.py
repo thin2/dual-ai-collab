@@ -1,5 +1,6 @@
 """HTTP contracts and persistence integration for the Task Management monitor."""
 import json
+import logging
 import os
 import sys
 from pathlib import Path
@@ -471,3 +472,21 @@ def test_overview_page_renders_with_project_context(client):
     assert client.get('/project/unknown/overview').status_code == 404
     assert '/static/js/batch.js' in client.get('/team').get_data(as_text=True)
     assert '/static/js/markdown.js' in client.get('/task/001').get_data(as_text=True)
+
+
+def test_command_line_serves_the_named_project_on_the_named_port(tmp_path, monkeypatch, capsys):
+    served = {}
+    monkeypatch.setattr(web_server.Flask, 'run', lambda app, **options: served.update(options, app=app))
+    requests_log = logging.getLogger('werkzeug')
+    level = requests_log.level
+    try:
+        web_server.main(['5999', '--project', str(tmp_path), '--quiet'])
+        assert requests_log.level == logging.ERROR
+    finally:
+        requests_log.setLevel(level)
+    assert (served['host'], served['port'], served['debug']) == ('127.0.0.1', 5999, False)
+    assert Path(served['app'].config['TASK_FILE']) == tmp_path.resolve() / 'planning/tasks.json'
+    assert 'http://localhost:5999' in capsys.readouterr().out
+    # Without --project it serves the folder this file is in, as it always has.
+    web_server.main([])
+    assert served['port'] == 5001 and served['app'] is web_server.app

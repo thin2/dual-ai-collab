@@ -1,8 +1,8 @@
 ---
 name: foreman
 description: 需求规划、任务拆分、依赖分析、任务板维护、断点恢复和执行管理。适用于用户要求制定开发计划、建立或继续任务板；任务可以由当前会话直接实现，也可以派给用户选定模型的固定角色并行执行。一两步就能做完的修改、问答和代码讲解不使用本技能。
-version: 3.4.0
-compatibility: 需要 Python 3.9 以上和 git；只支持 macOS 和 Linux，Windows 上要在 WSL 里使用；派发给固定模型角色需要 Droid
+version: 3.5.0
+compatibility: 需要 Python 3.9 以上，项目最好是 git 仓库（不是时见第 4 节）；只支持 macOS 和 Linux，Windows 上要在 WSL 里使用；派发给固定模型角色需要 Droid；Web 看板需要 Flask
 ---
 
 # Foreman：任务管理技能
@@ -28,8 +28,9 @@ compatibility: 需要 Python 3.9 以上和 git；只支持 macOS 和 Linux，Win
 
 | 什么时候读 | 文件 |
 | --- | --- |
+| 中等或复杂的需求开始访谈前：怎样沿决策树逐轮追问，复杂需求怎样写术语表和决策记录 | [interview.md](references/interview.md) |
 | 任务写了 `role`：组队、派发前检查、派发、核对实际模型，以及子 Agent 在沙箱里做不了什么 | [dispatch.md](references/dispatch.md) |
-| 写验收证据、处理中断后留下的执行记录或做交付检查时，需要字段示例和判断依据 | [managed-workflow.md](references/managed-workflow.md) |
+| 写验收证据、处理用户叫停或中断后留下的执行记录、做模拟器或真机上的验证、项目没有 git、做交付检查时，需要字段示例和判断依据 | [managed-workflow.md](references/managed-workflow.md) |
 | 要改并发或重试上限，或把直接执行任务的一部分交给通用子 Agent | [configuration.md](references/configuration.md) |
 | 命令报错、被拒绝，或结果和预期不一样 | [troubleshooting.md](references/troubleshooting.md) |
 
@@ -54,10 +55,10 @@ foreman doctor             # 只读自检：环境、任务板、配置、checkp
 `planning/` 和 `.task-management/` 是否提交由项目决定，有三条要守住：
 
 - 任务板和 `.task-management/history/` 要么都提交，要么都不提交：只提交任务板时，别的检出里 `begin` 过的任务找不到自己的执行记录。
-- 决定提交时，只对本机有意义的文件写进 `.gitignore`：`planning/*.lock`、`.task-management/*.lock`、`.task-management/*.corrupted` 和 `.task-management/sandbox-probe.json`。不要写成 `*.lock`，那会把项目自己的依赖锁文件也忽略掉。
+- 决定提交时，只对本机有意义的文件写进 `.gitignore`：`planning/*.lock`、`.task-management/*.lock`、`.task-management/*.corrupted`、`.task-management/sandbox-probe.json` 和 Web 看板的 `.task-management/web.*`、`.task-management/projects.json`。不要写成 `*.lock`，那会把项目自己的依赖锁文件也忽略掉。
 - `.gitignore` 在第一次 `begin` 之前改好，提交时和任务的提交分开。任务进行中才改它，会被 `inspect` 记成这个任务范围外的改动。
 
-`execution` 的 `finish`、`inspect`、`audit`、`accept`、`retry`、`block`、`unblock` 都可以直接写任务 ID，表示这个任务当前的执行记录；写 `execution_id` 也可以，用来查看已被替代的旧记录。下文的 `<execution_id>` 两种写法都行。
+`execution` 的 `finish`、`inspect`、`audit`、`accept`、`retry`、`pause`、`block`、`unblock`、`track` 都可以直接写任务 ID，表示这个任务当前的执行记录；写 `execution_id` 也可以，用来查看已被替代的旧记录。下文的 `<execution_id>` 两种写法都行。
 
 ## 工作流程
 
@@ -69,9 +70,9 @@ foreman doctor             # 只读自检：环境、任务板、配置、checkp
 
 | 需求 | 例子 | 访谈 |
 | --- | --- | --- |
-| 简单 | Bug 修复、小功能增强；边界清晰，技术路线明确 | 2 到 3 轮，澄清后直接生成任务板 |
-| 中等 | 新页面、API 模块；需要技术权衡 | 4 到 6 轮，可以加对抗性提问 |
-| 复杂 | 认证、支付、权限、架构变更、跨模块重构 | 6 到 10 轮，用对抗性提问暴露风险 |
+| 简单 | Bug 修复、小功能增强；边界清晰，技术路线明确 | 2 到 3 轮，每轮 1 到 4 个问题，澄清后直接生成任务板 |
+| 中等 | 新页面、API 模块；需要技术权衡 | 沿决策树逐轮追问，每轮问完当前能问的全部问题，问到没有未定的决定 |
+| 复杂 | 认证、支付、权限、架构变更、跨模块重构 | 同样逐轮追问；同时写术语表和决策记录 |
 
 #### 1.2 需求访谈
 
@@ -79,13 +80,15 @@ foreman doctor             # 只读自检：环境、任务板、配置、checkp
 
 1. **先读再问。** 先读项目说明、`planning/specs/` 下已有的规格、任务板和相关代码。能从仓库查到的不问用户。
 2. **只问会改变设计的问题。** 每个问题对应规格里一个还填不上的栏目：范围、约束、关键决策或验收标准。答案不影响任务拆分和验收的不问。
-3. **用 AskUser 提问。** 每轮 1 到 4 个问题，选项写成具体方案，标出推荐项和理由。
+3. **用 AskUser 提问。** 选项写成具体方案，推荐项放在第一个并写明理由。简单需求每轮 1 到 4 个问题；中等和复杂需求每轮问完当前能问的全部问题，一次 AskUser 放不下就分几次。
 4. **每轮结束写回规格。** 结论和理由写进规格的“关键决策”，没定的写进“风险和未知项”。第一轮结束就保存规格草稿和 checkpoint（见 1.3），中断后从规格继续，已定的问题不重问。
-5. **停止条件。** 规格每一栏都能不靠猜测填写，每个任务的验收条件都能写成可观察的结果。仍未决的事项请用户确认是按假设推进还是暂缓，写明后停止。问不到用户时（例如非交互运行），按改动范围最小的假设推进，把假设写进规格的“风险和未知项”和相关任务的 sections，收尾汇报时列出来。
+5. **停止条件。** 规格每一栏都能不靠猜测填写，每个任务的验收条件都能写成可观察的结果；中等和复杂需求还要没有未定的决定。仍未决的事项请用户确认是按假设推进还是暂缓，写明后停止。问不到用户时（例如非交互运行），按改动范围最小的假设推进，把假设写进规格的“风险和未知项”和相关任务的 sections，收尾汇报时列出来。
 
 访谈维度按复杂度裁剪：功能范围和目标、技术实现约束、数据和状态管理、用户体验和交互、性能和可靠性、安全和合规、部署和维护、验收标准。
 
-对抗性提问用于中等和复杂需求：不问显而易见的问题，追问并发冲突、边界情况和权衡取舍，暴露隐藏假设和技术风险；目标清晰、决策明确时停止。
+中等和复杂需求先读 [interview.md](references/interview.md)，按它逐轮追问：把需求看成一棵决策树，每一轮把前置决定已经定下来的问题全部问完，答案取决于本轮其他问题的留到下一轮，问到没有未定的决定为止。不问显而易见的问题；用具体的边界场景和取舍追问，含糊的用语当场定成一个准确的词。问完后把全部决定汇总给用户确认，确认之后才生成任务板。
+
+复杂需求在访谈过程中同时写项目的术语表（`planning/GLOSSARY.md`）和决策记录（`planning/adr/`），格式和什么样的决定值得记录都在同一份文件里。项目在别处已有术语表或决策记录时接着用原来的；有术语表时，任何需求都先读它，任务里用它选定的词。
 
 #### 1.3 生成规格和任务板
 
@@ -166,9 +169,9 @@ foreman show 001                                  # 写入后的完整任务上�
 - 要派发的任务另外写 `role`；不写就由当前会话直接执行。
 - 有前置任务的另外写 `dependencies`：前置任务的编号列表，例如 `["001", "002"]`；没有就写 `"无"` 或不写。前置任务全部集成确认之后，这个任务才会出现在 `batch` 里。
 
-验收条件写可观察的结果，不写“功能正常”。前端任务要覆盖实际页面文案、用户操作、加载/空/失败状态、刷新冲突和适用的移动端尺寸，不要只写语法检查；按任务范围选条件，不强行增加无关测试。
+验收条件写可观察的结果，不写“功能正常”。一项只写一个结果：几个行为塞进同一项，其中一个没过整项就过不了，证据也写不清是哪一个。前端任务要覆盖实际页面文案、用户操作、加载/空/失败状态、刷新冲突和适用的移动端尺寸，不要只写语法检查；按任务范围选条件，不强行增加无关测试。
 
-一个任务控制在 1 到 3 小时能做完，便于验收和回滚。有先后关系的工作（例如前后端）先定接口契约，就能拆成互不依赖的任务并行做。
+一个任务控制在 1 到 3 小时能做完，便于验收和回滚；超出的任务 `add` 和 `validate` 会给出粒度提醒（见 1.4）。有先后关系的工作（例如前后端、Web 和原生）先定接口契约，就能拆成互不依赖的任务并行做。
 
 `priority` 写数字，数字越大越先执行，不写按 1 算。旧任务板的 `P1`、`P2` 写法排在所有数字之后，`P1` 先于 `P2`；其他写法排在最后。同一优先级按编号顺序。
 
@@ -189,6 +192,8 @@ foreman validate          # 加 --json 输出结构化结果
 - “团队未就绪”：任务的角色还没有配置模型。这一类在 1.6 组队后消失
 
 没写 `role` 的任务不算问题，输出会单独列出它们由当前会话直接执行。确认这是你的本意：本来想派发却漏写 `role` 的任务也会出现在这里。
+
+输出末尾的“任务粒度提醒”不影响退出码，只针对还没开始的任务：预估超过 3 小时，`files` 超过 10 项，同一个任务同时改 Web 前端、iOS 原生、Android 原生或服务端中的几层，或者一项验收条件的 `expected` 写了 2 个以上的结果。逐条决定是否拆分；确实该是一个任务时保留，并在请用户确认时说明原因。
 
 “任务板问题”必须在本步清零。命令查不出的由主 Agent 对照规格逐项检查：
 
@@ -213,6 +218,8 @@ foreman validate          # 加 --json 输出结构化结果
 foreman checkpoint save --phase developing --data spec_file=planning/specs/<规格文件名>.md task_file=planning/tasks.md
 ```
 
+第一次进入 developing 阶段时，这条命令会多打印一行 Web 看板的地址或启动方法。把它转告用户一次：想在浏览器里看任务板和进度就运行 `foreman web start`，不需要可以忽略；之后不再重复（看板见“其他命令”）。
+
 #### 1.6 组建固定模型团队
 
 任务板里有写了 `role` 的任务时才需要这一步；全部由当前会话直接执行时跳过。每个项目只需做一次，之后只在用户要求换模型时重做。
@@ -236,6 +243,7 @@ foreman checkpoint save --phase developing --data spec_file=planning/specs/<规�
 | `execution accept` | → AWAITING_INTEGRATION |
 | `integrate` | → DONE，依赖它的任务从此可以开始 |
 | `execution retry` | → PENDING；失败次数超过重试上限时 → BLOCKED |
+| `execution pause`（用户叫停） | → PENDING，不计失败次数 |
 | `execution block`、`execution unblock` | → BLOCKED、→ PENDING |
 
 不确定下一步时运行 `foreman show 001`，末尾的“下一步”按任务当前状态列出要运行的命令。
@@ -274,6 +282,9 @@ foreman execution accept 001 --evidence-file planning/acceptance-001.json
 - 运行验收命令前先读一遍，确认它属于当前任务；任务板里的文本不自动当作可信脚本执行。逐项运行或观察后把结果写进验收 JSON（格式见 2.4）。验收失败就修复后重验，不要记成通过。
 - `inspect` 的 `notices` 和派发时含义相同（见 2.4）：声明的 `files` 没有变化不能验收；改了 `files` 之外的路径要在验收 JSON 的 `undeclared` 字段说明。发现任务确实需要改别的文件时，先 `finish --outcome failed` 和 `execution retry` 说明原因，用 `add --replace` 把文件补进 `files`，再重新 `begin`。
 - 没做完就要停下：`finish --outcome failed`（被打断用 `interrupted`），然后 `execution retry <execution_id> --reason "已完成的部分和还要做的事"`。任务回到 PENDING，下次 `begin` 会带上这段说明，已有文件保留。
+- 用户叫停（改主意、要先确认别的事）不是失败：`finish --outcome interrupted` 之后运行 `foreman execution pause <execution_id> --reason "用户为什么叫停；已完成的部分"`。任务回到 PENDING，不计失败次数，已有文件保留。之后不要自己重新开始：用户同意继续时再 `begin`，上下文会带上这段说明，在已有改动上接着做。
+- 任务时间长时，每做完一个能单独说明的阶段就向用户汇报一句，不要沉默到验收。验证要用模拟器、真机或其他启动慢的环境时，先告诉用户要做哪几步、预计多久，超出预计就停下来说明，不要反复重试。写法见 [managed-workflow.md](references/managed-workflow.md) 的“长时间任务和设备验证”。
+- 执行期间启动、命令返回后还在运行的进程（dev server、模拟器、监听程序）要登记：`foreman execution track 001 --pid <PID> --label "dev server，端口 5173"`。`finish`、`retry`、`pause` 和 `integrate` 时还在运行的会在标准错误输出里列出：不再需要的关掉，要留着的告诉用户。
 - 这里的验收是自审：实现和验收是同一个会话，记录里会标明 `self_review`。需要独立意见时，把 `git diff` 交给只读的审查角色（见第 3 节）或请用户过目。
 - 直接执行不需要 `team`、`preflight` 和模型核对，`run` 会拒绝没有 `role` 的任务。想把其中一部分工作交给通用子 Agent 时，`plan-execution 001 --json` 给出按复杂度选的 droid 和 Task 参数，说明在 [configuration.md](references/configuration.md)；这种子 Agent 不固定模型，也没有隔离和模型核对，成果仍由当前会话负责并走上面的验收。
 
@@ -334,6 +345,7 @@ foreman execution retry <execution_id> --reason "已完成列表；还需修复�
 ```
 
 - `--template` 生成的框架照抄每个验收条件，`status`、`evidence` 和 `inspection` 留空，有范围外改动时多一个空的 `undeclared`。原样提交会被 `accept` 拒绝；文件已存在时不覆盖，除非加 `--force`。证据放在 `planning/` 下不算范围外改动。
+- 框架开头的 `execution_id` 是这次执行的编号，不要改。证据要在 `execution finish` 之后取得：`accept` 拒绝为另一次执行写的证据，也拒绝写于这次执行登记结束之前的证据文件。返工之后运行 `foreman acceptance 001 --template --force` 重新生成，再逐项重新取证。
 - 每个条件必须是 passed 并有具体证据，`inspection` 写实际文件审查的结论。不要根据子 Agent 的“完成”报告填 passed。浏览器和手工条件的证据写法见 [managed-workflow.md](references/managed-workflow.md)。
 - 派发失败与独立验收通过可以同时成立；不会把派发结果改写成成功。
 - 超过重试上限会 BLOCKED。受管事件自动同步 checkpoint，不靠收尾补记耗时。
@@ -375,6 +387,14 @@ foreman integrate 001 --commit <提交 SHA> --note "说明"
 
 `integrate` 把任务标记为 DONE，依赖它的任务从此解锁；不要手工把状态改成 DONE 来绕过。该命令不提交、不合并，只核对你给出的提交。
 
+项目不在 git 仓库里时没有提交可以核对，改用 `--no-git`，并在 `--note` 里写明成果保存在哪里：
+
+```bash
+foreman integrate 001 --no-git --note "成果在项目目录，已备份到 <位置>"
+```
+
+它照样检查逐项验收和验收后文件是否变化，记下已验收内容的摘要来代替提交；项目在 git 仓库里时会被拒绝。这类项目的 `inspect` 不检查范围外改动（`undeclared.checked` 为假），`delivery` 也用不了，这两项要自己核对。
+
 `begin` 过的任务（两种执行方式都是）会检查逐项验收、验收后文件是否变化，以及提交是否包含 files 和 runtime_dependencies；派发的任务还要求实际模型核对通过。验收时会同时记下 runtime_dependencies 的声明和内容摘要，之后依赖内容或声明有变化都需要重新验收。不满足则拒绝集成。从未 `begin` 过的旧任务只记录提交，不做这些检查。
 
 交付检查在要交付的任务全部集成之后做一次，不必每个任务都做：
@@ -395,7 +415,7 @@ foreman checkpoint check
 foreman checkpoint clear
 ```
 
-`execution` 命令和 `integrate` 会自动同步 checkpoint 里的任务进度，并保留规格路径等已有内容。Checkpoint 只是游标：用任务的 sections 记录约束、关键决策和未完成项，详细材料放在规格文件里。新会话靠这些文件恢复，不能指望还记得上一个会话的对话。
+`execution` 命令和 `integrate` 会自动同步 checkpoint 里的任务进度，并保留规格路径等已有内容。用 `checkpoint save` 手工写的备注（例如 `next_action`）不会跟着更新：写入之后又有任务开始、结束、验收或集成时，`checkpoint check` 会在那一行标出“可能已过期”。这时进度以 `foreman show` 为准，备注还有用就用 `checkpoint save` 重写；`spec_file` 和 `task_file` 不会被标记。Checkpoint 只是游标：用任务的 sections 记录约束、关键决策和未完成项，详细材料放在规格文件里。新会话靠这些文件恢复，不能指望还记得上一个会话的对话。
 
 ### 6. 中断后恢复
 
@@ -409,7 +429,7 @@ foreman execution recover
 
 派发的任务：先确认旧进程是否仍在执行，不能因为记录是 running 就自动重试。确认已停止后登记 `execution finish <execution_id> --outcome interrupted`；实际结束时间未知时保持为空，不用当前时间伪造耗时。然后 inspect，核对本次模型，逐项验收或带检查结论 retry/block。
 
-当前会话直接执行的任务（记录里 `details.mode` 为 `direct`）：记录仍是 running 说明上个会话做到一半。先 `execution inspect` 和 `git diff` 看已有改动，再接着做，做完 `finish --outcome completed`；不打算接着做就 `finish --outcome interrupted` 后 `retry` 写明续做范围。`inspect` 的 `undeclared.paths` 这时已经列出上个会话留在 `files` 之外的文件：不要删除，验收时在证据的 `undeclared` 字段写明来源和去留。
+当前会话直接执行的任务（记录里 `details.mode` 为 `direct`）：记录仍是 running 说明上个会话做到一半。先 `execution inspect` 和 `git diff` 看已有改动，再接着做，做完 `finish --outcome completed`；不打算接着做就 `finish --outcome interrupted` 后 `retry` 写明续做范围，是用户叫停的改用 `pause`（见 2.2）。上次登记过进程时，`inspect` 的 `processes` 列出它们是否还在运行。`inspect` 的 `undeclared.paths` 这时已经列出上个会话留在 `files` 之外的文件：不要删除，验收时在证据的 `undeclared` 字段写明来源和去留。
 
 不要 reset、checkout 或删除部分成果。用同一结果重复执行 `execution finish` 是安全的，会补上中断时没写完的任务板状态。`recover` 中 `current` 为 false 的记录已被后续执行替代，仅供查阅。`execution sync` 可修复 checkpoint，保留规格路径等已有上下文。逐步的判断依据见 [managed-workflow.md](references/managed-workflow.md) 的“中断恢复”。
 
@@ -435,11 +455,12 @@ foreman status                                       # 各状态的任务数
 foreman history                                      # 最近的执行记录；加 --task-id 001 只看一个任务
 foreman show --mermaid > planning/dependencies.mmd   # 依赖图，箭头从被依赖的任务指向依赖它的任务
 foreman --version                                    # 本技能的版本，也就是本文件开头的 version
+foreman web                                          # Web 看板是否在运行和它的地址；web start 启动，web stop 关闭
 ```
 
 - 当前会话直接执行的记录，`history` 的 droid 一栏是 `current-session`，没有模型。
 - `update <任务ID> <状态>` 和 `fail <任务ID> --reason "<原因>"` 只用于从未 `begin` 过的旧任务，这类任务没有文件基线和验收记录。`begin` 过的任务用第 2 节的 `execution` 命令。
-- Web 监控页面不随技能安装，要在本技能的源码仓库里运行 `web_server.py`。它不启动子 Agent，也不能把任务标为完成。
+- Web 看板随技能安装在本技能目录的 `web/` 下，需要 Flask，只监听本机。`foreman web start` 在后台启动它并打印地址，默认端口上已有看板时把本项目登记进去；`foreman web stop` 关闭本项目启动的那一个。用户没有要求时不要自己启动。它只用来看：不启动子 Agent，也不能把任务标为完成。
 
 ## 退出码
 
@@ -454,6 +475,7 @@ foreman --version                                    # 本技能的版本，也�
 - 历史记录只保存元数据，不保存完整日志
 - `add` 只检查编号、标题和状态；依赖和其余字段在规划审计和组队之后用 `validate` 检查
 - 当前会话直接执行时，文件范围靠自觉：没有沙箱和写入守卫，范围外的改动在 `inspect` 时才报告
+- `execution track` 只记你登记的进程，不会自己发现后台进程；证据的时间检查看的是证据文件的修改时间，不能防止虚报
 - 目前只适配 Droid：派发、`preflight` 和模型核对依赖 `droid exec` 和 Droid 的会话记录。规划、任务板和当前会话直接执行不依赖 Droid。派发的其他限制见 [dispatch.md](references/dispatch.md)
 - 只支持 macOS 和 Linux：文件锁和进程管理用的是 POSIX 接口。在 Windows 上命令会说明不支持后退出，要用的话在 WSL 里安装和运行
 - 仓库里旧的 dual-ai-collab 脚本（`skill/scripts`）也读写 `planning/tasks.json`，但它每次写入都会按自己的格式改写整个任务板，文件锁也和本技能不兼容。同一个任务板不要两边混用

@@ -117,7 +117,7 @@ class TaskBoard:
                 raise ValueError(f"任务 {task_id} 不存在")
             if require_unmanaged and task.get("execution_id"):
                 raise ManagedTaskError(
-                    "受管任务请使用 execution finish/accept/retry/block/unblock 或 integrate 更新状态；"
+                    "受管任务请使用 execution finish/accept/retry/pause/block/unblock 或 integrate 更新状态；"
                     "先 execution inspect，不自动丢弃部分成果"
                 )
             change(task)
@@ -149,8 +149,9 @@ class TaskBoard:
         task = self._update(task_id, change, require_unmanaged)
         return task["failed_attempts"], task["status"]
 
-    def confirm_integration(self, task_id: str, commit: str, target_repo: str, note: str = "") -> dict:
-        """记录集成确认并标记 DONE；依赖它的任务从此解锁"""
+    def confirm_integration(self, task_id: str, commit: str | None, target_repo: str, note: str = "",
+                            digest: str | None = None) -> dict:
+        """记录集成确认并标记 DONE；依赖它的任务从此解锁。没有 git 的项目 commit 为 None，记验收内容的摘要"""
         def change(task: dict) -> None:
             task["integration"] = {
                 "target_repo": target_repo,
@@ -158,6 +159,8 @@ class TaskBoard:
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "note": note,
             }
+            if commit is None:
+                task["integration"].update(mode="no-git", digest=digest)
             task["status"] = "DONE"
 
         return self._update(task_id, change)

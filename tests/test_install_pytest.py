@@ -257,6 +257,9 @@ class InstallTests(unittest.TestCase):
             self.assertEqual(set(recorded), present)
             self.assertIn("SKILL.md", recorded)
             self.assertIn("bin/foreman", recorded)
+            # The web board is copied from the repository root, so the next upgrade can clean it up too.
+            self.assertIn("web/web_server.py", recorded)
+            self.assertIn("web/templates/overview.html", recorded)
 
     def test_installer_says_what_to_type_when_foreman_is_not_on_path(self):
         launcher = Path("/skills/foreman/bin/foreman")

@@ -43,12 +43,14 @@ from lib.store import (  # noqa: E402
     describe_error,
 )
 from lib.team import model_catalog  # noqa: E402
+from lib.web import board_status, start_board, stop_board  # noqa: E402
 from lib.workflow import (  # noqa: E402
     Workflow,
     delivery_check,
     evidence_template,
     is_direct,
     resolve_commit,
+    under_git,
 )
 
 
@@ -191,13 +193,19 @@ def cmd_add(args):
     print(f"已写入 {len(written)} 个任务: {'、'.join(written)}")
     # 任务已经写入；这里只是把 validate 会对它们报的问题提前说出来
     try:
-        problems = [item for item in check_plan(args.root)["board"] if item["task"] in written]
+        report = check_plan(args.root)
     except ValueError as error:
-        problems = []
+        report = {"board": [], "warnings": []}
         print(f"注意: 没能运行规划检查（{error}）", file=sys.stderr)
+    problems = [item for item in report["board"] if item["task"] in written]
+    warnings = [item for item in report["warnings"] if item["task"] in written]
     if problems:
         print(f"其中 {len(problems)} 处要在执行前补齐（改好文件后用 add --replace 重新写入）：")
         for item in problems:
+            print(f"  {item['task']} {item['field']}: {item['problem']}")
+    if warnings:
+        print(f"任务粒度提醒 {len(warnings)} 处（不阻止执行；要拆就改好文件后用 add --replace 重新写入）：")
+        for item in warnings:
             print(f"  {item['task']} {item['field']}: {item['problem']}")
     print(f"接着运行 {CLI} validate 检查字段、依赖和角色")
 
@@ -295,8 +303,14 @@ def _next_steps(workflow: Workflow, task: dict) -> list[str]:
                      f"{CLI} acceptance {tid} --template   # 生成 {relative}，逐项填写证据")
         steps.append(f"{CLI} execution accept {tid} --evidence-file {relative}")
         steps.append(f"不完整时: {CLI} execution retry {tid} --reason \"已完成的部分和还要做的事\"")
+        if (record.details.get("dispatch_outcome") == "interrupted"
+                and not (record.details.get("transport") or {}).get("timed_out")):
+            steps.append(f"是用户叫停的: {CLI} execution pause {tid} --reason \"用户为什么叫停、已完成的部分\"   # 不计失败次数")
         return steps
     if status == "AWAITING_INTEGRATION":
+        if not under_git(workflow.root):
+            return ["项目不在 git 仓库里，没有提交可以核对：确认成果已经保存好（例如做了备份）",
+                    f"{CLI} integrate {tid} --no-git --note \"<成果保存在哪里>\""]
         return ["用户授权后提交 files 和 runtime_dependencies 里的改动", f"{CLI} integrate {tid} --commit <提交 SHA>"]
     if status == "BLOCKED":
         return ["等用户处理阻塞原因", f"{CLI} execution unblock {tid} --reason \"<用户的处理结果>\""]
@@ -357,6 +371,10 @@ def cmd_validate(args):
             print(f"团队未就绪 {len(report['team'])} 个：")
             for item in report["team"]:
                 print(f"  {item['role']}（任务 {'、'.join(item['tasks'])}）: {item['problem']}")
+        if report["warnings"]:
+            print(f"任务粒度提醒 {len(report['warnings'])} 个（不影响退出码；确认是有意这样拆的，否则拆开后用 add --replace 重新写入）：")
+            for item in report["warnings"]:
+                print(f"  {item['task']} {item['field']}: {item['problem']}")
         if report["ok"]:
             count = len(report["checked"])
             print(f"规划检查通过：{count} 个未完成任务的字段、依赖和角色没有发现问题" if count else "没有未完成的任务需要检查")
@@ -400,11 +418,20 @@ def cmd_fail(args):
 
 def cmd_integrate(args):
     """确认任务的提交已在目标仓库中，记录集成并标记 DONE"""
-    repo = Path(args.target or args.root).resolve()
-    commit = resolve_commit(repo, args.commit)
     workflow = Workflow(args.root)
-    workflow.integrate(args.task_id, commit, repo, args.note or "")
-    print(f"任务 {args.task_id} 已集成（{commit[:12]}）→ DONE")
+    if args.no_git:
+        if args.target:
+            raise ValueError("--no-git 记录的是本项目里已验收的内容，不能和 --target 一起用")
+        task = workflow.integrate(args.task_id, None, args.root.resolve(), args.note or "")
+        digest = (task.get("integration") or {}).get("digest")
+        print(f"任务 {args.task_id} 已集成（没有提交" + (f"，已验收内容的摘要 {digest[:12]}" if digest else "") + "）→ DONE")
+    else:
+        repo = Path(args.target or args.root).resolve()
+        commit = resolve_commit(repo, args.commit)
+        task = workflow.integrate(args.task_id, commit, repo, args.note or "")
+        print(f"任务 {args.task_id} 已集成（{commit[:12]}）→ DONE")
+    if task.get("execution_id"):
+        _warn_processes(workflow, task["execution_id"])
     _warn_set_aside(workflow)
 
 
@@ -423,8 +450,17 @@ def cmd_checkpoint(args):
             if not separator or not key:
                 raise ValueError(f"--data 的每一项要写成 key=value，收到的是 {item!r}")
             data[key] = value
+        try:
+            entering = args.phase == "developing" and (checkpoint.load() or {}).get("phase") != "developing"
+        except ValueError:
+            entering = False
         checkpoint.save(args.phase, **data)
         print(f"Checkpoint 已保存: phase={args.phase}")
+        if entering:
+            # 只在进入开发阶段时说一次：之后每次保存都重复就成了噪音
+            board = board_status(args.root)
+            print(f"看板: {board['url']}" if board["listed"] else
+                  f"提示: 想在浏览器里看任务板和进度，运行 {CLI} web start（需要 Flask；不用可以忽略）")
     elif args.action == "clear":
         checkpoint.clear()
         print("Checkpoint 已清除")
@@ -586,7 +622,7 @@ def cmd_acceptance(args):
             raise ValueError(f"任务编号 {task['id']!r} 不能用作文件名：只能含字母、数字、下划线和连字符")
         record = Workflow(args.root).current_record(task)
         undeclared = ((record.details.get("undeclared") or {}).get("paths") or []) if record else []
-        template = evidence_template(task, undeclared)
+        template = evidence_template(task, undeclared, record.execution_id if record else None)
         path = _evidence_path(board, task)
         if path.exists() and not args.force:
             raise ValueError(f"{path} 已存在，直接编辑它；要重新生成用 --force（会覆盖已填写的内容）")
@@ -595,6 +631,11 @@ def cmd_acceptance(args):
         print(f"验收证据框架: {path}")
         print("逐项运行或观察后填写：每项 status 改为 passed 并写明 evidence，inspection 写实际文件审查结论。"
               "没通过的条件不要写 passed，修复后重验。")
+        if not record or record.status == "running" or record.details.get("recovery"):
+            print("注意: 这个任务当前没有已登记结束、等待验收的执行。证据要在 execution finish 之后取得："
+                  "之前填好的文件，或为另一次执行生成的框架，execution accept 都会拒绝。", file=sys.stderr)
+        else:
+            print(f"框架里的 execution_id 是这次执行（{record.execution_id}），不要改：证据只对这次执行有效。")
         if undeclared:
             print(f"执行期间声明范围外有改动：{'、'.join(undeclared)}；在 undeclared 字段写明来源和处理结论")
         print(f"填好后运行: {CLI} execution accept {task['id']} --evidence-file {path.relative_to(board.project_root)}")
@@ -637,6 +678,7 @@ def cmd_execution(args):
         _print_json(workflow.begin(args.id))
     elif args.action == "finish":
         _print_json(workflow.finish(args.id, args.outcome, args.ended_at))
+        _warn_processes(workflow, args.id)
     elif args.action == "inspect":
         _print_json(workflow.inspect(args.id))
     elif args.action == "audit":
@@ -645,7 +687,9 @@ def cmd_execution(args):
         if result["status"] not in {"passed", "not_applicable"}:
             sys.exit(2)
     elif args.action == "accept":
-        task = workflow.accept(args.id, _read_json(args.root, args.evidence_file, "验收证据文件"))
+        evidence = _read_json(args.root, args.evidence_file, "验收证据文件")
+        written_at = None if args.evidence_file == "-" else _input_file(args.root, args.evidence_file).stat().st_mtime
+        task = workflow.accept(args.id, evidence, written_at)
         record = workflow.current_record(task)
         print(f"验收已记录：任务 {task['id']} → {task['status']}")
         outcome = record.details["dispatch_outcome"]
@@ -658,6 +702,17 @@ def cmd_execution(args):
     elif args.action in {"retry", "block"}:
         workflow.retry(args.id, args.reason, args.action == "block")
         print("检查结论和续做原因已保存，原有文件保留")
+        _warn_processes(workflow, args.id)
+    elif args.action == "pause":
+        task = workflow.pause(args.id, args.reason)
+        print(f"已记为用户叫停：任务 {task['id']} 回到 PENDING，不计失败次数"
+              f"（仍是 {int(task.get('failed_attempts', 0))} 次），原有文件保留")
+        print(f"用户同意继续时: {_start_command(task)}")
+        print("重新开始时任务上下文会带上这段说明；先看已有改动，在它之上接着做")
+        _warn_processes(workflow, args.id)
+    elif args.action == "track":
+        entry = workflow.track(args.id, args.pid, args.label)
+        print(f"已登记进程 {entry['pid']}（{entry['label']}）；finish 和 integrate 时还在运行会提醒关闭")
     elif args.action == "unblock":
         workflow.unblock(args.id, args.reason)
         print("已按用户决定解除阻塞：任务回到 PENDING，失败次数清零")
@@ -670,7 +725,7 @@ def cmd_execution(args):
         _warn_unreadable(workflow.history)
         if records or workflow.history.unreadable:
             instruction = ("先确认子进程已结束；running 不代表仍存活。未知结束时间用 finish --outcome interrupted。"
-                           "再 inspect，审查文件后 accept、retry 或 block。不要自动重跑。"
+                           "再 inspect，审查文件后 accept、retry 或 block；是用户叫停的用 pause，不计失败次数。不要自动重跑。"
                            "details.mode 为 direct 的记录是当前会话直接执行的：仍是 running 时检查已有改动后接着做，"
                            "做完用 finish --outcome completed。"
                            "current 为 false 的记录已被后续派发替代或未登记到任务板，仅供查阅。")
@@ -682,6 +737,54 @@ def cmd_execution(args):
         if not workflow.checkpoint_set_aside:
             print("Checkpoint 已从实际任务板同步，保留其他上下文")
     _warn_set_aside(workflow)
+
+
+def _warn_processes(workflow: Workflow, execution_id: str) -> None:
+    alive = workflow.running_processes(execution_id)
+    if alive:
+        print("注意: 这次执行登记的进程还在运行：" + "；".join(f"{item['label']}（PID {item['pid']}）" for item in alive)
+              + "。不再需要的现在关掉，要留着的告诉用户它还开着", file=sys.stderr)
+
+
+def cmd_web(args):
+    """Web 看板：查看是否在运行，启动或关闭"""
+    root = args.root.resolve()
+    if args.action == "start":
+        if not any((root / marker).is_file() for marker in PROJECT_MARKERS):
+            raise ValueError(f"{root} 没有任务板或配置；先 cd 到项目目录，新项目先运行 {CLI} init")
+        result = start_board(root, args.port)
+        if args.json:
+            _print_json(result)
+        elif result["action"] == "started":
+            print(f"看板已启动: {result['url']}")
+            print(f"只监听本机；日志在 {result['log']}。用完后运行 {CLI} web stop 关闭")
+        elif result["action"] == "added":
+            print(f"端口 {result['port']} 上已有看板在运行，已把这个项目登记进去: {result['url']}")
+        else:
+            print(f"看板已在运行: {result['url']}")
+    elif args.action == "stop":
+        result = stop_board(root)
+        if args.json:
+            _print_json(result)
+        elif result["stopped"]:
+            print(f"看板已关闭（端口 {result['port']}）")
+        elif result["port"]:
+            print("看板进程已经不在，启动记录已清除")
+        else:
+            print(f"这个项目没有由 {CLI} web start 启动的看板")
+            board = board_status(root)
+            if board["running"]:
+                print(f"端口 {board['port']} 上的看板是别处启动的：在启动它的项目里运行 {CLI} web stop，或结束那个进程")
+    else:
+        result = board_status(root)
+        if args.json:
+            _print_json(result)
+        elif result["listed"]:
+            print(f"看板正在运行: {result['url']}")
+        elif result["running"]:
+            print(f"端口 {result['port']} 上有看板在运行，但没有登记这个项目；运行 {CLI} web start 把它加进去")
+        else:
+            print(f"看板没有运行；想在浏览器里看任务板和进度，运行 {CLI} web start")
 
 
 def _warn_set_aside(workflow: Workflow) -> None:
@@ -747,7 +850,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = subparsers.add_parser("batch", help="规划下一批可并行执行的任务")
     p.add_argument("--json", action="store_true", help="输出 JSON（派发的任务含 task_args）")
 
-    p = subparsers.add_parser("validate", help="规划检查：缺字段、依赖不存在或成环、角色未配置；有问题时退出码 1")
+    p = subparsers.add_parser("validate", help="规划检查：缺字段、依赖不存在或成环、角色未配置，有问题时退出码 1；"
+                                               "任务过大只提醒")
     p.add_argument("--json", action="store_true", help="JSON 输出")
 
     p = subparsers.add_parser("update", help="更新任务状态")
@@ -760,11 +864,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--reason", help="失败原因")
     p.add_argument("--block", action="store_true", help="直接改为 BLOCKED，不再重试（例如模型不可用）")
 
-    p = subparsers.add_parser("integrate", help="确认提交已集成，标记 DONE 并解锁依赖它的任务")
+    p = subparsers.add_parser("integrate", help="确认集成，标记 DONE 并解锁依赖它的任务；--commit 和 --no-git 二选一")
     p.add_argument("task_id", help="任务 ID")
-    p.add_argument("--commit", required=True, help="包含该任务修改的提交")
+    how = p.add_mutually_exclusive_group(required=True)
+    how.add_argument("--commit", help="包含该任务修改的提交")
+    how.add_argument("--no-git", action="store_true",
+                     help="项目不在 git 仓库里：不核对提交，记录已验收内容的摘要；必须加 --note")
     p.add_argument("--target", help="目标仓库路径（默认项目根目录）")
-    p.add_argument("--note", help="说明")
+    p.add_argument("--note", help="说明；--no-git 时必填，写明成果保存在哪里")
 
     p = subparsers.add_parser("checkpoint", help="Checkpoint 管理")
     p.add_argument("action", choices=["check", "save", "clear"], help="操作")
@@ -829,8 +936,10 @@ def build_parser() -> argparse.ArgumentParser:
         "audit": "核对子 Agent 实际使用的模型",
         "accept": "记录逐项验收证据",
         "retry": "记录检查结论，任务回到 PENDING 等待续做",
+        "pause": "用户叫停：任务回到 PENDING，不计失败次数",
         "block": "记录检查结论并把任务改为 BLOCKED",
         "unblock": "按用户的决定解除 BLOCKED",
+        "track": "登记执行期间启动、之后还在运行的进程",
     }
     for action, summary in actions.items():
         item = execution.add_parser(action, help=summary)
@@ -843,14 +952,23 @@ def build_parser() -> argparse.ArgumentParser:
             item.add_argument("--ended-at", help="实际结束时间，带时区；中断且未知时省略")
         elif action == "accept":
             item.add_argument("--evidence-file", required=True, help="逐项验收 JSON")
-        elif action in {"retry", "block", "unblock"}:
+        elif action in {"retry", "block", "unblock", "pause"}:
             item.add_argument("--reason", required=True,
-                              help="用户的处理结果" if action == "unblock" else "实际文件检查结果及续做范围")
+                              help={"unblock": "用户的处理结果", "pause": "用户为什么叫停，以及已经做完的部分"}.get(
+                                  action, "实际文件检查结果及续做范围"))
+        elif action == "track":
+            item.add_argument("--pid", type=int, required=True, help="进程的 PID")
+            item.add_argument("--label", required=True, help="这个进程是什么，例如“dev server，端口 5173”")
     execution.add_parser("recover", help="列出尚未集成的执行记录，用于中断后恢复")
     execution.add_parser("sync", help="按任务板修复 checkpoint 里的任务进度")
     p = subparsers.add_parser("delivery", help="检查提交是否包含显式声明的运行依赖")
     p.add_argument("--commit", default="HEAD")
     p.add_argument("--paths", nargs="+", required=True)
+
+    p = subparsers.add_parser("web", help="Web 看板：是否在运行和它的地址；start 启动，stop 关闭")
+    p.add_argument("action", nargs="?", choices=["status", "start", "stop"], default="status", help="操作，默认 status")
+    p.add_argument("--port", type=int, help="start 时使用的端口（默认从 5001 起找空闲端口）")
+    p.add_argument("--json", action="store_true", help="JSON 输出")
 
     return parser
 
@@ -888,6 +1006,7 @@ def main():
             "run": cmd_run,
             "execution": cmd_execution,
             "delivery": cmd_delivery,
+            "web": cmd_web,
         }[args.command]
 
         cmd_func(args)

@@ -8,7 +8,7 @@
 foreman doctor    # 加 --json 输出结构化结果
 ```
 
-它只读不写，逐项列出 Python、git、`foreman` 是否在 PATH、任务板、配置、checkpoint、执行记录，以及派发需要的 droid、模型配置和角色。“问题”一项会让一部分命令用不了，退出码为 1；“注意”不影响当前能做的事。规划本身的问题仍用 `validate`。
+它只读不写，逐项列出 Python、git、`foreman` 是否在 PATH、项目是否在 git 仓库里、任务板、配置、checkpoint、执行记录、Web 看板是否在运行，以及派发需要的 droid、模型配置和角色。“问题”一项会让一部分命令用不了，退出码为 1；“注意”不影响当前能做的事。规划本身的问题仍用 `validate`。
 
 “droid”“模型配置”“角色”三项只关系到写了 `role` 的任务。有任务在等用户为角色选模型时，“角色”是问题属于预期：直接执行的任务照常进行，那个任务按没完成汇报。
 
@@ -55,6 +55,18 @@ foreman execution audit <execution_id>
 ```
 
 `run` 结束时会自动核对一次；出现这条提示，说明那次没有通过，或者任务是手工用 Task 派发的。仍不通过时不要换模型，也不要改记录：检查实际文件后运行 `execution block <execution_id> --reason "实际模型不符及文件检查结果"`，报告用户。当前会话直接执行的任务没有这一步。
+
+## execution accept 提示证据是为另一次执行写的，或写于登记结束之前
+
+证据文件是上一次执行留下的，或者在 `execution finish` 之前就写好了。不要改文件里的 `execution_id` 或文件时间：运行 `foreman acceptance <任务ID> --template --force` 重新生成框架，按这次执行的实际结果逐项重验后填写。
+
+## integrate 提示不是 git 仓库
+
+项目不在 git 仓库里时没有提交可核对，改用 `foreman integrate <任务ID> --no-git --note "<成果保存在哪里>"`。反过来，项目在 git 仓库里时 `--no-git` 会被拒绝：先提交任务的改动，再用 `--commit`。
+
+## foreman web start 启动不了
+
+提示需要 Flask 时，按提示里的命令安装后重试。提示这份安装里没有 Web 看板的文件时，技能是旧版安装脚本装的：用源码仓库的 `install.py` 加 `--force` 重装。不带 `--port` 时从 5001 起找空闲端口；启动失败的日志在项目的 `.task-management/web.log`。
 
 ## 派发结果是 permission_rejected
 

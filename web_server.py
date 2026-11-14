@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""Local Task Management monitor. Run python web_server.py [port]."""
+"""Local Task Management monitor. Run python web_server.py [port] [--project <root>]."""
+import argparse
 import json
+import logging
 import re
 import sys
 import threading
@@ -18,7 +20,9 @@ if sys.platform == 'win32':
              'The web UI runs on macOS and Linux only. On Windows, run it inside WSL.')
 
 REPO_ROOT = Path(__file__).resolve().parent
-sys.path.insert(0, str(REPO_ROOT / 'foreman'))
+# In the source repository the library sits in foreman/; an installed skill keeps this file in its web/ folder.
+FOREMAN_ROOT = REPO_ROOT / 'foreman' if (REPO_ROOT / 'foreman' / 'lib').is_dir() else REPO_ROOT.parent
+sys.path.insert(0, str(FOREMAN_ROOT))
 from lib.board import TaskBoard  # noqa: E402
 from lib.config import ExecutionConfig  # noqa: E402
 from lib.executor import TaskExecutor  # noqa: E402
@@ -357,7 +361,20 @@ def create_app(repo_root=None, registry_file=None):
 
 app = create_app()
 
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description='foreman 的本地 Web 看板，只监听 127.0.0.1')
+    parser.add_argument('port', nargs='?', type=int, default=5001, help='端口，默认 5001')
+    parser.add_argument('--project', help='默认项目的根目录（默认是本文件所在的目录）；登记记录也保存在它的 .task-management/ 下')
+    parser.add_argument('--quiet', action='store_true', help='不逐条打印请求日志')
+    args = parser.parse_args(argv)
+    served = create_app(args.project) if args.project else app
+    if args.quiet:
+        # The pages poll every few seconds; one line per request would fill the log of a board left running.
+        logging.getLogger('werkzeug').setLevel(logging.ERROR)
+    print(f'Task Management：http://localhost:{args.port}', flush=True)
+    served.run(host='127.0.0.1', port=args.port, debug=False)
+
+
 if __name__ == '__main__':
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 5001
-    print(f'Task Management：http://localhost:{port}')
-    app.run(host='127.0.0.1', port=port, debug=False)
+    main()

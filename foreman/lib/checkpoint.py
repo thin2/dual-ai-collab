@@ -18,6 +18,10 @@ class CheckpointError(ValueError):
     """checkpoint 文件存在，但内容不能用"""
 
 
+# 文档让人存在这里的两个路径：只要文件还在就一直有效，不随执行事件过期
+LASTING_KEYS = {"spec_file", "task_file"}
+
+
 class CheckpointManager:
     """Checkpoint 管理器"""
 
@@ -28,17 +32,25 @@ class CheckpointManager:
 
     def save(self, phase: str, /, **data: Any) -> None:
         """
-        保存 checkpoint
+        保存 checkpoint：data 整体替换原有内容，并记下每一项的写入时间
 
         Args:
             phase: 当前阶段 (planning, developing, reviewing)
             **data: 额外数据
         """
+        stamp = datetime.now(timezone.utc).isoformat()
+        self.write(phase, data, {key: stamp for key in data})
+
+    def write(self, phase: str, data: dict, written_at: dict, last_event_at: str | None = None) -> None:
+        """写入 checkpoint。written_at 是手工写入各项的时间，last_event_at 是最近一次执行事件的时间"""
         checkpoint = {
             "phase": phase,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "data": data,
+            "written_at": written_at,
         }
+        if last_event_at:
+            checkpoint["last_event_at"] = last_event_at
 
         self.checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
         content = json.dumps(checkpoint, ensure_ascii=False, indent=2) + "\n"
@@ -82,10 +94,33 @@ class CheckpointManager:
             f"Time: {checkpoint.get('timestamp', 'unknown')}",
         ]
 
+        outdated = self.outdated(checkpoint)
         for key, value in data.items():
-            lines.append(f"{key}: {value}")
+            mark = f"   ← 写于 {outdated[key]}，之后已有执行事件，可能已过期" if key in outdated else ""
+            lines.append(f"{key}: {value}{mark}")
+        if outdated:
+            lines.append("标出的项是 checkpoint save 写入的，执行事件不会更新它们：任务进度以 foreman show 为准，"
+                         "过期的内容用 checkpoint save 重写")
 
         return "\n".join(lines)
+
+    @staticmethod
+    def outdated(checkpoint: dict) -> dict:
+        """手工写入、之后又发生过执行事件的项及其写入时间；规格和任务板的路径不算"""
+        written = checkpoint.get("written_at")
+        try:
+            event = datetime.fromisoformat(checkpoint["last_event_at"])
+        except (KeyError, TypeError, ValueError):
+            return {}
+        found = {}
+        for key, stamp in (written.items() if isinstance(written, dict) else ()):
+            try:
+                older = datetime.fromisoformat(stamp) < event
+            except (TypeError, ValueError):
+                continue
+            if older and key in checkpoint.get("data", {}) and key not in LASTING_KEYS:
+                found[key] = stamp
+        return found
 
     def clear(self) -> None:
         """清除 checkpoint"""

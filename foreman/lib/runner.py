@@ -145,6 +145,8 @@ def run_task(root: Path, task_id: str, dispatcher: str, timeout: int = 1800,
                 os.killpg(process.pid, signal.SIGKILL)
                 process.communicate()
                 outcome = "interrupted"
+                # Nobody asked for this stop, so it must not pass for a pause.
+                transport["timed_out"] = True
             except KeyboardInterrupt:
                 outcome = "interrupted"
                 raise

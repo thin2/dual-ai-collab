@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import stat
 import subprocess
@@ -78,28 +79,48 @@ def _signature(path: bytes, content: bool) -> str:
         return f"{info.st_size}:{info.st_mtime_ns}"
 
 
+def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, check=False,
+                          env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"})
+
+
+def _work_tree_prefix(root: Path) -> bytes | None:
+    """Where root sits inside its work tree; None when git cannot report on root.
+
+    That covers a folder without a repository, a machine without git, and a project
+    an enclosing repository ignores, which would always look clean.
+    """
+    try:
+        prefix = _git(root, "rev-parse", "--show-prefix")
+        if prefix.returncode or (prefix.stdout.strip() and _git(root, "check-ignore", "-q", ".").returncode == 0):
+            return None
+    except OSError:
+        return None
+    return prefix.stdout.rstrip(b"\n")
+
+
+def under_git(root: Path) -> bool:
+    """Whether the project's changes can be committed and compared with a commit."""
+    return _work_tree_prefix(Path(root)) is not None
+
+
 def worktree_state(root: Path) -> dict | None:
     """Uncommitted paths under root as git status lists them, plus HEAD.
 
     None when root is not inside a work tree git can report on. Ignored files are
     as invisible here as they are to git status.
     """
-    def git(*args: str) -> subprocess.CompletedProcess:
-        return subprocess.run(["git", "-C", str(root), *args], capture_output=True, check=False,
-                              env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"})
-
+    prefix = _work_tree_prefix(root)
+    if prefix is None:
+        return None
     try:
-        prefix = git("rev-parse", "--show-prefix")
-        # A project ignored by an enclosing repository would always look clean.
-        if prefix.returncode or (prefix.stdout.strip() and git("check-ignore", "-q", ".").returncode == 0):
-            return None
-        status = git("status", "--porcelain=v1", "-z", "-uall", "--no-renames", "--", ".")
+        status = _git(root, "status", "--porcelain=v1", "-z", "-uall", "--no-renames", "--", ".")
         if status.returncode:
             return None
-        head = git("rev-parse", "-q", "--verify", "HEAD")
+        head = _git(root, "rev-parse", "-q", "--verify", "HEAD")
     except OSError:
         return None
-    skip = len(prefix.stdout.rstrip(b"\n"))
+    skip = len(prefix)
     paths = {}
     for entry in status.stdout.split(b"\0"):
         if len(entry) < 4:
@@ -162,8 +183,11 @@ def requirements(task: dict) -> list[dict]:
     return checks
 
 
-def evidence_template(task: dict, undeclared: list[str] | None = None) -> dict:
-    """Skeleton for execution accept. Verdicts and evidence are blank, so it is refused until filled in."""
+def evidence_template(task: dict, undeclared: list[str] | None = None, execution_id: str | None = None) -> dict:
+    """Skeleton for execution accept. Verdicts and evidence are blank, so it is refused until filled in.
+
+    execution_id names the run the evidence is about; accept refuses it for any other run.
+    """
     checks = []
     for check in requirements(task):
         item = {"id": check["id"], "status": "", "evidence": "", "scenario": check["scenario"],
@@ -171,10 +195,35 @@ def evidence_template(task: dict, undeclared: list[str] | None = None) -> dict:
         if check.get("command"):
             item["command"] = check["command"]
         checks.append(item)
-    template = {"inspection": "", "checks": checks}
+    template = {"execution_id": execution_id} if execution_id else {}
+    template.update(inspection="", checks=checks)
     if undeclared:
         template["undeclared"] = ""
     return template
+
+
+# File times are kept to the second, or to two seconds, on some filesystems.
+EVIDENCE_TIME_SLACK = 2.0
+
+
+def process_started(pid: int) -> str | None:
+    """When the process with this PID started, as ps prints it; None when there is no such process.
+
+    A PID is handed out again after its process exits, so the start time is what identifies a process.
+    """
+    try:
+        listed = subprocess.run(["ps", "-p", str(pid), "-o", "lstart="], capture_output=True, text=True,
+                                check=False, env={**os.environ, "LC_ALL": "C"})
+    except OSError:
+        return None
+    started = " ".join(listed.stdout.split())
+    return started if listed.returncode == 0 and started else None
+
+
+def _content_digest(accepted: dict) -> str:
+    """One digest for everything acceptance pinned: it stands in for the commit in a project without git."""
+    pinned = {"files": accepted["snapshot"], "runtime_dependencies": accepted["dependency_snapshot"]}
+    return hashlib.sha256(json.dumps(pinned, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
 def _path_list(task: dict, field: str, purpose: str) -> list[str]:
@@ -290,9 +339,11 @@ class Workflow:
         return {"checked": True, "head_moved": before["head"] != after["head"],
                 "paths": sorted(p for p in moved if not _within(p, scopes) and not p.startswith(workspace))}
 
-    def sync(self) -> None:
+    def sync(self, event: bool = False) -> None:
         """Rewrite the checkpoint's progress from the board.
 
+        event says an execution step just happened: what checkpoint save wrote before it
+        may no longer be true, and checkpoint check marks it. Repairing the checkpoint is not an event.
         An unreadable checkpoint is moved aside, not overwritten; checkpoint_set_aside names where.
         """
         checkpoint = CheckpointManager(self.root)
@@ -306,10 +357,15 @@ class Workflow:
         tasks = self.board.get_all_tasks()
         completed = sum(t.get("status") == "DONE" and bool(t.get("integration")) for t in tasks)
         active = [t["id"] for t in tasks if t.get("status") == "IN_PROGRESS"]
-        data.update(total_tasks=len(tasks), completed_tasks=completed, active_tasks=active,
-                    current_task=active[0] if len(active) == 1 else None,
-                    task_file="planning/tasks.md")
-        checkpoint.save("completed" if tasks and completed == len(tasks) else "developing", **data)
+        progress = dict(total_tasks=len(tasks), completed_tasks=completed, active_tasks=active,
+                        current_task=active[0] if len(active) == 1 else None,
+                        task_file="planning/tasks.md")
+        data.update(progress)
+        written = previous.get("written_at")
+        # These now come from the board, whoever wrote them last.
+        written = {key: stamp for key, stamp in written.items() if key not in progress} if isinstance(written, dict) else {}
+        checkpoint.write("completed" if tasks and completed == len(tasks) else "developing", data, written,
+                         now() if event else previous.get("last_event_at"))
 
     def begin(self, task_id: str) -> dict:
         self._task(task_id)
@@ -363,7 +419,7 @@ class Workflow:
                          "audit": {"status": "not_applicable" if direct else "pending"}},
             )
             self.board.update_task(task["id"], {"status": "IN_PROGRESS", "execution_id": execution_id})
-            self.sync()
+            self.sync(event=True)
             plan["execution_id"] = execution_id
             if direct:
                 session_plan(plan)
@@ -424,7 +480,7 @@ class Workflow:
             # Keep file ownership until independent inspection and acceptance.
             if first or task["status"] == "IN_PROGRESS":
                 self.board.update_task_status(task["id"], "AWAITING_REVIEW")
-            self.sync()
+            self.sync(event=first)
             return asdict(record)
 
     def inspect(self, execution_id: str) -> dict:
@@ -442,6 +498,10 @@ class Workflow:
             "baseline_files": sorted(before), "acceptance": record.details["acceptance"],
             "instruction": "差异只说明文件变化，不证明是谁修改或是否完成。检查 diff 和新增文件后再决定。",
         }
+        if record.details.get("processes"):
+            report["processes"] = [{"pid": item["pid"], "label": item["label"],
+                                    "running": process_started(item["pid"]) == item["started"]}
+                                   for item in record.details["processes"]]
         if record.status == "running":
             # Nothing is concluded before finish, but the stray paths are already listed:
             # a session taking over this run has to see them before it adds changes of its own.
@@ -484,8 +544,11 @@ class Workflow:
             self.history._save_record(execution_id, record)
             return result
 
-    def accept(self, execution_id: str, evidence: dict):
-        """Store main-agent evidence independently of the worker result."""
+    def accept(self, execution_id: str, evidence: dict, written_at: float | None = None):
+        """Store main-agent evidence independently of the worker result.
+
+        written_at is when the evidence file was last modified, for evidence that came from a file.
+        """
         if not isinstance(evidence, dict):
             raise ValueError("验收证据格式错误：应是含 inspection 和 checks 的 JSON 对象；"
                              "用 foreman acceptance <任务ID> --template 生成框架")
@@ -498,6 +561,16 @@ class Workflow:
                                  "先登记派发结束；中断时用 interrupted，未知结束时间保持为空")
             if task["status"] not in {"AWAITING_REVIEW", "AWAITING_INTEGRATION"}:
                 raise ValueError("任务已集成或已决定重新派发，不能用旧记录重新验收")
+            # A file filled in for an earlier run of this task is still on disk after a retry.
+            regenerate = (f"用 foreman acceptance {task['id']} --template --force 重新生成框架，"
+                          "按这次执行的实际结果逐项重验后填写")
+            claimed = evidence.get("execution_id")
+            if claimed is not None and claimed != record.execution_id:
+                raise ValueError(f"验收证据是为执行 {claimed} 写的，这次执行是 {record.execution_id}；{regenerate}")
+            finished = datetime.fromisoformat(record.recorded_at).timestamp() if record.recorded_at else None
+            if written_at is not None and finished is not None and written_at < finished - EVIDENCE_TIME_SLACK:
+                raise ValueError("验收证据文件最后修改于这次执行登记结束之前，不是对这次执行的验收："
+                                 "证据要在 finish 之后逐项运行或观察取得；" + regenerate)
             if not model_verified(record):
                 raise ValueError("实际模型尚未核对通过，不能验收")
             checks = requirements(task)
@@ -538,7 +611,7 @@ class Workflow:
             record.details["inspection_required"] = False
             self.history._save_record(execution_id, record)
             self.board.update_task_status(task["id"], "AWAITING_INTEGRATION", reset_retries=True)
-            self.sync()
+            self.sync(event=True)
             return self.board.get_task(task["id"])
 
     def retry(self, execution_id: str, reason: str, block: bool = False):
@@ -558,7 +631,57 @@ class Workflow:
                 record.details["acceptance"]["status"] = "invalidated"
             self.history._save_record(execution_id, record)
             self.board.record_failure(task["id"], ExecutionConfig(self.root).get_max_retries(), block, reason)
-            self.sync()
+            self.sync(event=True)
+
+    def pause(self, execution_id: str, reason: str) -> dict:
+        """Put a run the user stopped back to PENDING. Being told to stop is not a failed attempt."""
+        if not reason.strip():
+            raise ValueError("必须说明用户为什么叫停，以及已经做完的部分")
+        with _file_lock(self.lock):
+            record = self._record(execution_id)
+            task = self._latest(record)
+            if record.status == "running":
+                raise ValueError(f"先运行 foreman execution finish {task['id']} --outcome interrupted "
+                                 "登记这次执行被叫停，再 pause")
+            outcome = record.details["dispatch_outcome"]
+            if outcome != "interrupted" or (record.details.get("transport") or {}).get("timed_out"):
+                raise ValueError(f"这次执行登记的结果是 {'超时终止' if outcome == 'interrupted' else outcome}，"
+                                 "不是用户叫停：pause 只用于用户叫停的执行；没做完或失败用 execution retry")
+            if task["status"] != "AWAITING_REVIEW":
+                raise ValueError(f"只有登记结束、还没有验收的任务可以暂停（现在是 {task['status']}）；"
+                                 f"运行 foreman show {task['id']} 查看下一步")
+            record.details["recovery"] = {"recorded_at": now(), "reason": reason, "inspection": self.inspect(execution_id),
+                                          "decision": "retry", "paused": True}
+            self.history._save_record(execution_id, record)
+            # failed_attempts is left as it is: only retry counts towards the limit.
+            task = self.board.update_task(task["id"], {"status": "PENDING",
+                                                       "last_failure": f"用户叫停（不计失败次数）：{reason}"})
+            self.sync(event=True)
+            return task
+
+    def track(self, execution_id: str, pid: int, label: str) -> dict:
+        """Note a process started for this run that outlives the command that started it."""
+        if not label.strip():
+            raise ValueError("必须说明这个进程是什么，例如“dev server，端口 5173”")
+        with _file_lock(self.lock):
+            record = self._record(execution_id)
+            task = self._latest(record)
+            if task["status"] == "DONE":
+                raise ValueError("任务已集成，不再登记进程")
+            started = process_started(pid) if pid > 0 else None
+            if not started:
+                raise ValueError(f"没有 PID 为 {pid} 的进程：登记的是还在运行的进程")
+            entry = {"pid": pid, "label": label.strip(), "started": started, "recorded_at": now()}
+            kept = [item for item in record.details.get("processes", [])
+                    if (item["pid"], item["started"]) != (pid, started)]
+            record.details["processes"] = [*kept, entry]
+            self.history._save_record(execution_id, record)
+            return entry
+
+    def running_processes(self, execution_id: str) -> list[dict]:
+        """The processes noted for this run that are still alive."""
+        record = self._record(execution_id)
+        return [item for item in record.details.get("processes", []) if process_started(item["pid"]) == item["started"]]
 
     def unblock(self, execution_id: str, reason: str):
         """Resume a BLOCKED task on the user's decision without counting another failure."""
@@ -576,7 +699,7 @@ class Workflow:
             self.history._save_record(execution_id, record)
             note = "\n".join(filter(None, [task.get("last_failure"), f"解除阻塞：{reason}"]))
             self.board.update_task(task["id"], {"status": "PENDING", "failed_attempts": 0, "last_failure": note})
-            self.sync()
+            self.sync(event=True)
 
     def integration_ready(self, task_id: str, commit: str | None = None, repo: Path | None = None):
         task = self._task(task_id)
@@ -608,26 +731,41 @@ class Workflow:
             if not report["ok"]:
                 raise ValueError("提交未包含全部已验收文件或运行依赖；先运行 foreman delivery --commit <SHA> --paths <路径...> 查看缺失路径")
 
-    def integrate(self, task_id: str, commit: str, repo: Path, note: str = "") -> dict:
-        """Check, record the commit and mark DONE under one lock so nothing interleaves."""
+    def integrate(self, task_id: str, commit: str | None, repo: Path, note: str = "") -> dict:
+        """Check, record the integration and mark DONE under one lock so nothing interleaves.
+
+        commit is None for a project without git: there is no commit to check, so the
+        digest of what acceptance pinned is recorded in its place.
+        """
         self._task(task_id)
+        if commit is None:
+            if not note.strip():
+                raise ValueError("--no-git 需要 --note：写明成果保存在哪里、怎么留存（例如备份的位置）")
+            if under_git(self.root):
+                raise ValueError(f"{self.root} 在 git 仓库里：提交任务的改动后用 foreman integrate {task_id} "
+                                 "--commit <提交 SHA>；--no-git 只用于没有 git 的项目")
         with _file_lock(self.lock):
             task = self.board.get_task(task_id)
             if task and task.get("execution_id") and task["status"] == "DONE":
                 done = (task.get("integration") or {}).get("commit")
                 if done != commit:
-                    raise ValueError(f"任务已集成（提交 {str(done)[:12]}），不能改记为其他提交")
+                    raise ValueError(f"任务已集成（提交 {str(done)[:12]}），不能改记为其他提交" if done else
+                                     "任务已按内容快照集成（没有提交），不能改记为提交")
                 self.sync()
                 return task
             self.integration_ready(task_id, commit, repo)
+            digest = None
             # Record first: if the board update is lost, repeating integrate still passes
             # the checks above, whereas a DONE task could never be recorded afterwards.
             if task.get("execution_id"):
                 record = self._record(task["execution_id"])
                 record.details["integration"] = {"commit": commit, "recorded_at": now()}
+                if commit is None:
+                    digest = _content_digest(record.details["acceptance"])
+                    record.details["integration"].update(mode="no-git", digest=digest)
                 self.history._save_record(record.execution_id, record)
-            task = self.board.confirm_integration(task_id, commit, str(repo), note)
-            self.sync()
+            task = self.board.confirm_integration(task_id, commit, str(repo), note, digest)
+            self.sync(event=True)
             return task
 
 

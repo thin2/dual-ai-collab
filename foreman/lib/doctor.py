@@ -14,6 +14,8 @@ from .history import ExecutionHistory
 from .plan import FINISHED_STATUSES
 from .store import DEFAULT_TASKS_MD, TaskStoreError, read_tasks_document
 from .team import TeamError, list_byok_models
+from .web import board_status
+from .workflow import under_git
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 LAUNCHER = SKILL_ROOT / "bin" / "foreman"
@@ -52,7 +54,7 @@ def diagnose(root: Path | None, cwd: Path) -> list[dict]:
     if git:
         report(OK, "git", git)
     else:
-        report(NOTE, "git", "PATH 里没有 git：integrate、delivery 和范围外改动检查用不了", "安装 git")
+        report(NOTE, "git", "PATH 里没有 git：delivery 和范围外改动检查用不了，集成只能用 integrate --no-git", "安装 git")
     found = shutil.which("foreman")
     if found and Path(found).resolve() == LAUNCHER.resolve():
         report(OK, "命令", f"foreman 在 PATH 中（{found}）")
@@ -69,11 +71,15 @@ def diagnose(root: Path | None, cwd: Path) -> list[dict]:
         report(NOTE, "项目", f"{cwd} 及其上级目录（到 git 仓库根目录为止）没有任务板或配置",
                "新项目运行 foreman init；已有项目先 cd 到它的目录")
     else:
-        report(OK, "项目", str(root))
+        if git and not under_git(root):
+            report(NOTE, "项目", f"{root}，不在 git 仓库里：不检查范围外改动，集成用 foreman integrate <任务ID> --no-git --note <说明>")
+        else:
+            report(OK, "项目", str(root))
         tasks = _board(root, report)
         roles = _config(root, report)
         _checkpoint(root, report)
         _records(root, tasks, report)
+        _web_board(root, report)
     _dispatch(tasks, roles, report)
     return items
 
@@ -131,6 +137,21 @@ def _records(root: Path, tasks: list[dict], report) -> None:
                "正在做的任务不用处理；上个会话留下的运行 foreman execution recover 查看")
     if not (unreadable or lost or running):
         report(OK, "执行记录", f"{len(records)} 条" if records else "没有执行记录")
+
+
+def _web_board(root: Path, report) -> None:
+    """Whether the board is up is never a problem: nothing in the workflow needs it."""
+    try:
+        board = board_status(root)
+    except ValueError as error:
+        report(NOTE, "看板", str(error))
+        return
+    if board["listed"]:
+        report(OK, "看板", f"正在运行：{board['url']}")
+    elif board["running"]:
+        report(NOTE, "看板", f"端口 {board['port']} 上有看板在运行，但没有登记这个项目", "foreman web start 把它加进去")
+    else:
+        report(OK, "看板", "没有运行；想在浏览器里看任务板和进度时运行 foreman web start")
 
 
 def _dispatch(tasks: list[dict], roles: dict, report) -> None:

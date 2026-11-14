@@ -6,7 +6,7 @@ Droid 原生任务管理技能 - 规划、拆分、执行和验收完整工作�
 
 ## 特性
 
-- 🎯 **需求访谈和复杂度判断**：根据需求规模调整规划深度
+- 🎯 **需求访谈和复杂度判断**：根据需求规模调整规划深度；中等和复杂需求沿决策树逐轮追问，复杂需求同时写术语表和决策记录
 - 📋 **任务板管理**：`add` 写入、`show` 查看、状态追踪、依赖分析
 - ✍️ **当前会话直接执行**：不派发子 Agent，同样记录文件基线、检查改动、逐项验收
 - 🤖 **原生 Droid 集成**：受管进程通过 Task 派发固定模型子 Agent
@@ -16,9 +16,12 @@ Droid 原生任务管理技能 - 规划、拆分、执行和验收完整工作�
 - ✅ **独立验收**：结构化条件、实际文件审查、逐项证据与变更失效检查
 - 📊 **执行历史**：追踪任务执行记录和性能数据
 - 🔄 **Checkpoint 恢复**：长期项目的进度保存和恢复
+- 🖥️ **Web 看板**：`foreman web start` 在浏览器里看任务板和进度
 - **完整模型选择**：推荐只排序，同名模型保留全部线路，支持搜索和直接输入完整 ID
 - **中断恢复**：派发结果与验收分开保存，失败后保留部分文件，不盲目重跑
 - **隔离预检**：临时原生沙箱、最小环境、固定假数据探针，失败不派发
+- **用户叫停不算失败**：`execution pause` 让任务回到待开始，不占重试次数
+- **没有 git 也能集成**：`integrate --no-git` 按已验收内容的摘要记录
 
 ## 快速开始
 
@@ -32,7 +35,7 @@ python3 install.py --profile foreman --bin-dir ~/.local/bin
 # 可通过 FACTORY_SKILLS 环境变量或 --target 自定义
 ```
 
-需要 Python 3.9 以上和 git，只支持 macOS 和 Linux。在 Windows 上命令和安装脚本会说明不支持后退出；要用的话在 WSL 里安装和运行。
+需要 Python 3.9 以上，只支持 macOS 和 Linux。项目最好是 git 仓库：不是的话不检查范围外改动，集成用 `integrate --no-git`。在 Windows 上命令和安装脚本会说明不支持后退出；要用的话在 WSL 里安装和运行。
 
 命令是技能目录下的 `bin/foreman`，下文都写作 `foreman`。
 
@@ -60,10 +63,10 @@ foreman show                          # 任务板：编号、状态、由谁执�
 根据需求复杂度选择合适的规划深度：
 
 - **简单**（2-3 轮）：Bug 修复、小功能
-- **中等**（4-6 轮）：新页面、API 模块
-- **复杂**（6-10 轮）：认证、支付、架构变更
+- **中等**（沿决策树逐轮追问）：新页面、API 模块
+- **复杂**（逐轮追问，同时写术语表和决策记录）：认证、支付、架构变更
 
-访谈由本技能自己完成：先读仓库，只问会改变设计的问题，每轮结论写回规格文件。生成规格文档和任务板后运行 `validate`，在派发前列出缺字段、依赖不存在或成环、角色未配置的任务。
+访谈由本技能自己完成，不依赖别的技能：先读仓库，只问会改变设计的问题，结论随时写回规格文件。中等和复杂需求把需求看成决策树，每一轮把当前能问的问题全部问完并给出推荐答案，问到没有未定的决定为止，最后把全部决定交给用户确认；复杂需求同时写项目的术语表（`planning/GLOSSARY.md`）和决策记录（`planning/adr/`），项目在别处已有时接着用原来的。做法见 [需求访谈](references/interview.md)，对照的是 [mattpocock/skills](https://github.com/mattpocock/skills) 的 grilling 和 domain-modeling（MIT 许可）在 2026-11-12 的版本；上游再改时，对照它更新 `references/interview.md`。生成规格文档和任务板后运行 `validate`，在派发前列出缺字段、依赖不存在或成环、角色未配置的任务。它还会给出不影响退出码的“任务粒度提醒”：预估超过 3 小时、`files` 超过 10 项、同时改 Web 和原生等多层、一项验收条件写了多个结果。
 
 ### 2. 执行阶段
 
@@ -79,7 +82,7 @@ foreman execution finish 001 --outcome completed
 
 `execution` 的子命令可以直接写任务 ID，表示该任务当前的执行记录；`show 001` 末尾会按任务状态列出下一步命令。
 
-不需要组队、`preflight` 和调度模型。之后的验收和集成与派发的任务相同（见第 3、4 步），只是不做模型核对，验收记录会标明是自审。没做完时用 `finish --outcome failed` 加 `execution retry` 记下续做范围。
+不需要组队、`preflight` 和调度模型。之后的验收和集成与派发的任务相同（见第 3、4 步），只是不做模型核对，验收记录会标明是自审。没做完时用 `finish --outcome failed` 加 `execution retry` 记下续做范围；是用户叫停的用 `finish --outcome interrupted` 加 `execution pause`，不计失败次数。执行期间启动的 dev server、模拟器等用 `execution track` 登记，结束时还在运行的会被列出来。
 
 **派给固定模型的角色（任务写了 `role`）**：
 
@@ -105,7 +108,7 @@ foreman execution accept 001 --evidence-file planning/acceptance-001.json
 foreman execution retry 001 --reason "文件检查结论与还需完成的事项"
 ```
 
-`inspect` 的 `notices` 会指出声明的文件完全没有变化，或派发期间有声明范围外的改动；后者必须在验收证据的 `undeclared` 字段说明。权限拒绝不代表没有写入文件，派发返回也不代表验收通过。`accept` 逐项检查证据和本次模型审计，保存独立时间戳；不会把失败派发改写成成功。证据格式和恢复步骤见 [执行记录、验收证据与恢复](references/managed-workflow.md)，派发的完整步骤和隔离边界见 [派给固定模型的角色](references/dispatch.md)。
+`inspect` 的 `notices` 会指出声明的文件完全没有变化，或派发期间有声明范围外的改动；后者必须在验收证据的 `undeclared` 字段说明。权限拒绝不代表没有写入文件，派发返回也不代表验收通过。`accept` 逐项检查证据和本次模型审计，保存独立时间戳；不会把失败派发改写成成功。证据框架带这次执行的 `execution_id`：为另一次执行写的证据、写于 `execution finish` 之前的证据文件都会被拒绝。证据格式和恢复步骤见 [执行记录、验收证据与恢复](references/managed-workflow.md)，派发的完整步骤和隔离边界见 [派给固定模型的角色](references/dispatch.md)。
 
 ### 4. 集成确认
 
@@ -115,6 +118,8 @@ foreman execution retry 001 --reason "文件检查结论与还需完成的事项
 foreman integrate 001 --commit <SHA>
 foreman delivery --commit HEAD --paths <各任务运行依赖的并集...>
 ```
+
+项目不在 git 仓库里时用 `foreman integrate 001 --no-git --note "<成果保存在哪里>"`，记录已验收内容的摘要代替提交。
 
 受管任务缺少验收、模型审计、运行依赖，或验收后文件变化时不能集成。依赖被要求保留未提交时明确报告限制，不擅自提交。
 
@@ -253,6 +258,7 @@ foreman team show            # 另有 set、remove、check、audit
 foreman batch --json
 foreman fail 001 --reason "..."
 foreman integrate 001 --commit <SHA>
+foreman integrate 001 --no-git --note "<成果保存在哪里>"   # 项目不在 git 仓库里时
 
 # 受管执行与恢复
 foreman preflight --dispatcher "custom:<用户选定ID>"
@@ -265,8 +271,15 @@ foreman execution accept <execution_id> --evidence-file planning/acceptance-001.
 foreman execution retry <execution_id> --reason "保留部分成果，继续剩余工作"
 foreman execution block <execution_id> --reason "实际模型不符，等用户处理"
 foreman execution unblock <execution_id> --reason "用户已处理阻塞原因"
+foreman execution pause <execution_id> --reason "用户叫停的原因和已完成的部分"   # 不计失败次数
+foreman execution track <execution_id> --pid <PID> --label "dev server，端口 5173"
 foreman execution sync
 foreman delivery --commit HEAD --paths <运行依赖路径...>
+
+# Web 看板（需要 Flask）
+foreman web                  # 是否在运行和地址
+foreman web start            # 另有 --port
+foreman web stop
 ```
 
 ## 测试
@@ -343,15 +356,17 @@ python3 install.py --profile foreman
 
 ## 可选工具
 
-### Web UI
-仓库根目录的 `web_server.py` 用于可视化监控（不随技能安装，需要在仓库里运行）：
+### Web 看板
+本地的可视化监控页面，随技能安装在技能目录的 `web/` 下，需要 Flask（`python3 -m pip install --user Flask`）：
 
 ```bash
-python3 web_server.py 5001
-open http://localhost:5001
+cd /path/to/your/project
+foreman web start      # 后台启动并打印地址；默认端口上已有看板时把本项目登记进去
+foreman web            # 是否在运行和地址
+foreman web stop       # 关闭本项目启动的看板
 ```
 
-默认显示的是该仓库目录；要看自己的项目，在页面顶部“登记项目”。页面内容、接口和故障排查见仓库的 `docs/web-ui.md`。
+只监听本机，从 5001 起找空闲端口（`--port` 或环境变量 `FOREMAN_WEB_PORT` 可以指定）。页面只用来看，不启动子 Agent，也不能把任务标为完成。页面内容、接口和故障排查见仓库的 `docs/web-ui.md`。
 
 ## 最佳实践
 
@@ -420,13 +435,16 @@ foreman/
 │   ├── runner.py        # 嵌套 Task 派发与自动记录
 │   ├── safety.py        # 单次运行的原生沙箱配置
 │   ├── probe.py         # 无敏感数据的隔离探针
+│   ├── web.py           # Web 看板的状态、启动和关闭
 │   └── checkpoint.py    # Checkpoint 管理
 ├── bin/
 │   └── foreman          # 命令入口，运行 tools/cli.py
 ├── tools/
 │   ├── cli.py           # CLI 实现
 │   └── dispatch_guard.py # 工具 schema 和文件路径检查
+├── web/                 # 只在安装后的副本里：Web 看板（仓库根目录的 web_server.py 等）
 └── references/          # SKILL.md 按需引用的细节
+    ├── interview.md         # 逐轮追问、术语表和决策记录
     ├── dispatch.md          # 组队、派发、模型核对与隔离边界
     ├── managed-workflow.md  # 执行记录、证据格式、恢复步骤与交付检查
     ├── configuration.md     # 配置项，按复杂度选通用子 Agent

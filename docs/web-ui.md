@@ -1,16 +1,32 @@
 # Web UI 使用指南
 
-仓库根目录的 `web_server.py` 是 foreman 的本地监控页面：查看任务板、进度、团队配置和执行记录，也能改少数状态。它不启动子 Agent，不调用模型，也不随技能安装，需要在本仓库里运行。旧版 dual-ai-collab（`skill/`）的数据它不读取。
+仓库根目录的 `web_server.py` 是 foreman 的本地监控页面：查看任务板、进度、团队配置和执行记录，也能改少数状态。它不启动子 Agent，不调用模型。它随技能一起安装，用 `foreman web start` 启动。旧版 dual-ai-collab（`skill/`）的数据它不读取。
 
 ## 启动
 
 ```bash
 python3 -m pip install --user Flask   # 只有 Web UI 需要 Flask，技能本身只用标准库
-cd <本仓库>
-python3 web_server.py 5001            # 端口可省略，默认 5001
+cd /path/to/project
+foreman web start                     # 后台启动，打印地址；日志在 .task-management/web.log
+foreman web                           # 是否在运行和地址；加 --json 输出结构化结果
+foreman web stop                      # 关闭本项目启动的看板
 ```
 
-浏览器打开 http://localhost:5001 。服务只监听 `127.0.0.1`，其他机器访问不到。修改代码或升级后要重启服务再刷新页面。
+`foreman web start` 做的事：
+
+- 没有看板在运行时，从 5001 起找一个空闲端口，在后台启动，默认项目就是当前项目。`--port` 指定端口；环境变量 `FOREMAN_WEB_PORT` 改变默认端口。
+- 默认端口上已经有看板时，不再起第二个，把当前项目登记进去并打印它的地址。
+- 当前项目已经在某个看板里时，只打印地址。
+
+`foreman web stop` 只关闭本项目启动的看板；别的项目启动的要在那个项目里关闭。`foreman doctor` 和第一次 `checkpoint save --phase developing` 也会报告看板的地址。
+
+看板的文件随技能安装在技能目录的 `web/` 下。在本仓库里开发时也可以直接运行，前台启动：
+
+```bash
+python3 web_server.py 5001 --project /path/to/project   # 端口默认 5001；不加 --project 时默认项目是本仓库
+```
+
+服务只监听 `127.0.0.1`，其他机器访问不到。修改代码或升级后要重启服务再刷新页面。
 
 和 foreman 一样只支持 macOS 和 Linux；在 Windows 上要在 WSL 里运行。
 
@@ -18,9 +34,9 @@ python3 web_server.py 5001            # 端口可省略，默认 5001
 
 页面顶部选择当前项目。
 
-- **默认项目**是 `web_server.py` 所在的目录，也就是本仓库。
-- **其他项目**用“登记项目”添加：填项目名称和项目根目录的绝对路径（`init` 时所在的目录）。登记不会创建、移动或初始化任何文件；没有任务板的目录显示为空列表。同一个目录不能登记两次。
-- 登记记录保存在本仓库的 `.task-management/projects.json`。要换位置，启动前设置环境变量 `TASK_MANAGEMENT_PROJECTS_FILE=/absolute/path/projects.json`。
+- **默认项目**是启动看板的那个项目：`foreman web start` 所在的项目，或 `--project` 指定的目录；直接运行 `web_server.py` 又不加 `--project` 时是它所在的目录，也就是本仓库。
+- **其他项目**在自己的目录里运行 `foreman web start` 就会登记进来，也可以在页面上用“登记项目”添加：填项目名称和项目根目录的绝对路径（`init` 时所在的目录）。登记不会创建、移动或初始化任何文件；没有任务板的目录显示为空列表。同一个目录不能登记两次。
+- 登记记录保存在默认项目的 `.task-management/projects.json`。要换位置，启动前设置环境变量 `TASK_MANAGEMENT_PROJECTS_FILE=/absolute/path/projects.json`。
 - 旧版用过的 `.dual-ai-collab/projects.json` 和 `DUAL_AI_PROJECTS_FILE` 不再读取，以前登记的项目要重新登记。
 - 登记过的目录被删除或移走后，选择器里显示“路径不可用”，这个项目的接口返回 409。
 
@@ -89,10 +105,13 @@ GET  /api/specs/<文件名>                    规划文档内容（超过 1 MiB
 ## 故障排查
 
 ### 端口被占用
-换一个端口，例如 `python3 web_server.py 8080`。macOS 的隔空播放接收器占用 5000，所以默认用 5001。
+`foreman web start` 会从 5001 起自己找空闲端口；要指定就用 `foreman web start --port 8080`。macOS 的隔空播放接收器占用 5000，所以默认用 5001。
+
+### foreman web start 说需要 Flask 或没有看板文件
+按提示里的命令安装 Flask。提示这份安装里没有 Web 看板的文件时，用本仓库的 `install.py` 加 `--force` 重新安装技能。启动失败的日志在项目的 `.task-management/web.log`。
 
 ### 任务列表为空
-先确认顶部选的是哪个项目：默认项目是本仓库，不是你正在开发的项目。其他项目要先登记，登记的路径应是项目根目录（有 `planning/tasks.json` 的那一层）。
+先确认顶部选的是哪个项目：默认项目是启动看板的那个项目，不一定是你正在开发的项目。其他项目要先登记，登记的路径应是项目根目录（有 `planning/tasks.json` 的那一层）。
 
 ### 页面显示 Internal server error
 服务不把错误细节发给页面，也不写进终端日志，避免泄露文件内容。通常是项目里某个数据文件不是合法的 JSON。在项目目录运行：

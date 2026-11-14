@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from .board import TaskBoard
@@ -37,11 +38,68 @@ def _dispatch_problems(root: Path, task: dict) -> list[tuple[str, str]]:
     return problems
 
 
+# A task is meant to be done, accepted and rolled back in one piece.
+MAX_HOURS = 3
+MAX_FILES = 10
+MAX_RESULTS = 2
+# A folder that names a platform decides the layer; otherwise the file type does.
+LAYER_FOLDERS = {"ios": "iOS 原生", "android": "Android 原生", "web": "Web 前端", "frontend": "Web 前端",
+                 "backend": "服务端", "server": "服务端"}
+LAYER_SUFFIXES = {
+    "Web 前端": {".js", ".jsx", ".ts", ".tsx", ".vue", ".svelte", ".html", ".css", ".scss", ".less"},
+    "iOS 原生": {".swift", ".m", ".mm", ".xib", ".storyboard"},
+    "Android 原生": {".kt", ".kts"},
+}
+
+
+def _layer(path: str) -> str | None:
+    parts = Path(path).parts
+    for part in parts:
+        if part.lower() in LAYER_FOLDERS:
+            return LAYER_FOLDERS[part.lower()]
+    suffix = Path(path).suffix.lower()
+    return next((layer for layer, suffixes in LAYER_SUFFIXES.items() if suffix in suffixes), None)
+
+
+def _results(expected: str) -> int:
+    """How many separate outcomes one expected text lists: clauses, or the items of a numbered list."""
+    clauses = [part for part in re.split(r"[；;\n]+", expected) if part.strip()]
+    numbered = re.findall(r"(?:^|[\s，,；;：:])\d+[.、)）](?!\d)|[（(]\d+[)）]", expected)
+    return max(len(clauses), len(numbered))
+
+
+def _size_warnings(task: dict) -> list[tuple[str, str]]:
+    """Signs that a task is too large to accept or roll back in one piece. None of them stops execution."""
+    found = []
+    hours = task.get("estimated_hours")
+    if isinstance(hours, (int, float)) and not isinstance(hours, bool) and hours > MAX_HOURS:
+        found.append(("estimated_hours", f"预估 {hours:g} 小时，超过 {MAX_HOURS} 小时；拆成 1 到 {MAX_HOURS} 小时能做完的任务"))
+    files = task.get("files")
+    if isinstance(files, list) and all(isinstance(path, str) for path in files):
+        if len(files) > MAX_FILES:
+            found.append(("files", f"列了 {len(files)} 项，超过 {MAX_FILES} 项；一次验收和回滚的范围太大，按功能拆开"))
+        layers: dict[str, str] = {}
+        for path in files:
+            layers.setdefault(_layer(path) or "", path)
+        layers.pop("", None)
+        if len(layers) > 1:
+            found.append(("files", "同时改 " + "、".join(f"{layer}（{path}）" for layer, path in layers.items())
+                          + "；每一层单独一个任务，先定好它们之间的接口"))
+    checks = task.get("acceptance")
+    for check in checks if isinstance(checks, list) else []:
+        expected = check.get("expected") if isinstance(check, dict) else None
+        if isinstance(expected, str) and _results(expected) > MAX_RESULTS:
+            found.append(("acceptance", f"{check.get('id')} 的 expected 写了 {_results(expected)} 个结果；"
+                          "一项验收条件只写一个可观察的结果，其余拆成单独的条件"))
+    return found
+
+
 def check_plan(root: Path) -> dict:
     root = Path(root).resolve()
     tasks = TaskBoard.load(root).get_all_tasks()
     config = ExecutionConfig(root)
     board: list[dict] = []
+    warnings: list[dict] = []
     unready: dict[str, list[str]] = {}
     direct: list[str] = []
 
@@ -94,10 +152,15 @@ def check_plan(root: Path) -> dict:
             for section in task.get("sections", [])
         ):
             problem(task_id, "description", "没有任务描述：执行时只能看到标题和验收条件")
+        # Once a task has started, splitting it is no longer a planning decision.
+        if known and status in READY_STATUSES:
+            warnings.extend({"task": task_id, "field": field, "problem": text} for field, text in _size_warnings(task))
     for cycle in dependency_cycles(tasks):
         problem(cycle[0], "dependencies", "依赖成环：" + " → ".join(cycle))
 
     team = [{"role": role, "tasks": ids,
              "problem": f"角色尚未配置模型；运行 foreman team set {role} --model <模型ID> --description <职责>"}
             for role, ids in unready.items()]
-    return {"ok": not board and not team, "checked": checked, "direct": direct, "board": board, "team": team}
+    # Warnings do not make the plan fail: whether to split a task is left to whoever planned it.
+    return {"ok": not board and not team, "checked": checked, "direct": direct, "board": board, "team": team,
+            "warnings": warnings}
