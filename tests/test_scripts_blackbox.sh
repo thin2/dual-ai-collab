@@ -116,7 +116,7 @@ teardown_test_env
 # ═══════════════════════════════════════════
 
 setup_test_env
-it "select_next_task.sh 应返回依赖已满足的任务"
+it "select_next_task.sh 不应由旧 DONE 解锁依赖"
 mkdir -p "$TEST_DIR/planning"
 cat > "$TEST_DIR/planning/codex-tasks.md" << 'EOF'
 ## 任务 #001: 基础任务
@@ -136,7 +136,7 @@ cat > "$TEST_DIR/planning/codex-tasks.md" << 'EOF'
 ---
 EOF
 result=$(bash "$PROJECT_DIR/skill/scripts/select_next_task.sh" "$TEST_DIR/planning/codex-tasks.md" 2>&1)
-assert_contains "$result" "002"
+assert_equals "NO_EXECUTABLE_TASKS" "$result"
 teardown_test_env
 
 setup_test_env

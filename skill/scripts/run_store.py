@@ -11,24 +11,30 @@ from tasks_store import CliError, atomic_write
 from platform_utils import is_process_running, terminate_process_tree, wait_for_process_exit
 
 
-RUNS_DIR = Path(".dual-ai-collab/runs")
-LOGS_DIR = Path(".dual-ai-collab/logs")
+def _runs_dir() -> Path:
+    """Return runs directory relative to current working directory."""
+    return Path.cwd() / ".dual-ai-collab" / "runs"
+
+
+def _logs_dir() -> Path:
+    """Return logs directory relative to current working directory."""
+    return Path.cwd() / ".dual-ai-collab" / "logs"
 
 
 def run_record_path(task_num: str) -> Path:
-    return RUNS_DIR / f"task-{task_num}.json"
+    return _runs_dir() / f"task-{task_num}.json"
 
 
 def pid_file_path(task_num: str) -> Path:
-    return LOGS_DIR / f"task-{task_num}.pid"
+    return _logs_dir() / f"task-{task_num}.pid"
 
 
 def exit_file_path(task_num: str) -> Path:
-    return LOGS_DIR / f"task-{task_num}.exit"
+    return _logs_dir() / f"task-{task_num}.exit"
 
 
-def read_run_record(task_num: str) -> dict:
-    path = run_record_path(task_num)
+def read_run_record(task_num: str, *, project_root=None) -> dict:
+    path = (Path(project_root) / ".dual-ai-collab/runs" / f"task-{task_num}.json") if project_root is not None else run_record_path(task_num)
     if not path.exists():
         return {}
     try:
@@ -65,8 +71,12 @@ def read_exit_code(task_num: str) -> int | None:
 
 
 def update_run_status(record: dict) -> dict:
+    if record.get("backend") == "app-server":
+        from session_backend import status
+        return status(record)
     pid = int(record.get("pid", 0) or 0)
-    if pid > 0 and is_process_running(pid):
+    is_running = is_process_running(pid) if pid > 0 else False
+    if pid > 0 and is_running:
         record["status"] = "running"
         return record
 
@@ -82,6 +92,9 @@ def update_run_status(record: dict) -> dict:
 
 
 def stop_run_record(record: dict) -> dict:
+    if record.get("backend") == "app-server":
+        from session_backend import stop
+        return stop(record)
     pid = int(record.get("pid", 0) or 0)
     if pid > 0 and is_process_running(pid):
         terminate_process_tree(pid, force=False)

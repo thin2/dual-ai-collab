@@ -2,7 +2,8 @@
 
 ## 任务板文件路径
 
-`planning/codex-tasks.md`
+`planning/tasks.json` 是真相源；`planning/codex-tasks.md` 是同步渲染的任务定义。
+运行 `board show` / `board show --json` 查看实时聚合面板。
 
 ## 任务板头部
 
@@ -83,7 +84,7 @@
 - `**依赖任务**: #001` — 依赖单个任务
 - `**依赖任务**: #001, #002` — 依赖多个任务，所有列出的任务都必须完成
 
-依赖检查规则：依赖任务状态为 DONE 或 VERIFIED 即可解锁。
+依赖检查规则：必须有与当前任务定义和执行轮次匹配的集成记录，目标提交仍在目标仓库 HEAD 历史中，且集成验收报告通过。旧 DONE / VERIFIED 不会自动解锁。
 
 `**依赖任务**` 中出现的每个 `#编号` 都是硬依赖，`select` 不会领取依赖未完成的任务。
 
@@ -109,11 +110,10 @@
 ## 状态流转
 
 ```
-OPEN → IN_PROGRESS → DONE → VERIFIED（审计通过）
-                       ↓
-                   REJECTED → DONE（修复后重新审计）
-                       ↓
-                   FAILED（超过 3 次修复上限）
+OPEN → IN_PROGRESS → AWAITING_REVIEW → AWAITING_INTEGRATION → DONE
+                           ↓
+                       REJECTED → 修复 → 重新验收与审查
+
 ```
 
 ## 审查字段说明
@@ -121,3 +121,16 @@ OPEN → IN_PROGRESS → DONE → VERIFIED（审计通过）
 - `**Codex审查**`: Codex 代码审查结果（未审查 / PASS / FAIL + 评分）
 - `**Claude审查**`: Claude 最终审查结果（未审查 / VERIFIED / REJECTED + 评分）
 - 修复后两个审查字段重置为"未审查"，重新走完整审计流程
+
+## 面板与交付证据
+
+`board show` 分别显示任务阶段、执行结果、验收、审查、集成和下一步。运行记录和验收报告从 `.dual-ai-collab` 读取，任务 JSON 只保存任务定义与人工审查/集成凭据。查看 Markdown 老任务板时不会自动迁移写入 JSON。
+
+- `run complete 001`：在执行目录验收，成功仅进入待审查。
+- `board review 001 --decision approved --note "审查结论"`：记录主模型/人工审查。拒绝用 rejected。
+- `board integrate 001 --target /source --commit SHA --note "该提交包含任务改动"`：要求目标工作区干净、提交已经进入 HEAD，并在目标目录重新验收。不自动合并或提交。
+- 新轮次、任务范围变更、重新验收或手动改变状态会让旧凭据失效。
+- 集成命令检查提交可达性和验收结果；审查者仍须确认指定提交实际包含本任务改动，不会自动证明代码语义等价。
+- 非 Git 项目可继续执行/审查，当前不能通过自动集成确认解锁硬依赖。
+
+`board context 001` 导出不超过 64 KiB 的上下文；包含任务章节、规范引用、依赖和验收，不递归读取文件或历史日志。额外约束、决策与相关文件应维护在任务章节中。

@@ -69,9 +69,9 @@ teardown_test_env
 
 setup_test_env
 create_deps_taskboard
-it "依赖已 VERIFIED 的任务应被视为可执行"
+it "旧 VERIFIED 记录未确认集成时不解锁依赖"
 result=$(select_task "$TASK_BOARD")
-assert_equals "002" "$(selected_id "$result")"
+assert_equals "004" "$(selected_id "$result")"
 teardown_test_env
 
 setup_test_env
@@ -134,9 +134,9 @@ cat > "$TASK_BOARD" <<'EOF'
 
 ---
 EOF
-it "多重依赖全部满足时应可领取"
+it "旧 DONE 和 VERIFIED 都不能代替集成记录"
 result=$(select_task "$TASK_BOARD")
-assert_equals "003" "$(selected_id "$result")"
+assert_equals "NO_EXECUTABLE_TASKS" "$result"
 teardown_test_env
 
 setup_test_env

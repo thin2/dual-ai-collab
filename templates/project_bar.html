@@ -1,0 +1,32 @@
+<div class="project-bar">
+    <div class="project-picker">
+        <label for="projectSelect">当前项目</label>
+        <select id="projectSelect" aria-label="切换项目">
+            {% for item in projects %}
+            <option value="{{ item.id }}" {% if item.id == project.id %}selected{% endif %} {% if not item.available %}disabled{% endif %}>{{ item.name }}{% if not item.available %} · 路径不可用{% endif %}</option>
+            {% endfor %}
+        </select>
+        <span class="project-path" title="{{ project.path }}">{{ project.path }}</span>
+    </div>
+    <div class="project-nav">
+        <a href="{{ url_for('overview', project_id=project.id) }}" class="nav-link">概览</a>
+        <a href="{{ url_for('index', project_id=project.id) }}" class="nav-link">任务</a>
+        <a href="{{ url_for('team', project_id=project.id) }}" class="nav-link">团队</a>
+    </div>
+    <button class="register-toggle" id="registerToggle" aria-expanded="false" aria-controls="registerProject">登记项目 ＋</button>
+</div>
+<form id="registerProject" class="register-project" hidden>
+    <p>登记已有文件夹；任务与记录保留在各项目中。</p>
+    <div class="register-fields">
+        <label>项目名称<input name="name" required maxlength="100" placeholder="例如：客户门户" autocomplete="off"></label>
+        <label>项目目录<input name="path" required placeholder="/Users/username/projects/project-directory" autocomplete="off" spellcheck="false"></label>
+        <button type="submit" class="register-submit">登记并打开</button>
+    </div>
+    <p id="projectMessage" role="status"></p>
+</form>
+<script>
+    const projectId = {{ project.id | tojson }};
+    const projectApi = '/api/projects/' + encodeURIComponent(projectId);
+    const projectPage = '/project/' + encodeURIComponent(projectId);
+</script>
+<script src="/static/js/projects.js" defer></script>

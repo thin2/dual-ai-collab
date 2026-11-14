@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>团队配置 - Task Management</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/team.css">
+</head>
+<body>
+    <main class="container">
+        {% include "project_bar.html" %}
+        <header>
+            <div class="masthead">
+                <a href="/" class="brand">Task Management</a>
+                <span class="edition">团队监控</span>
+            </div>
+            <div class="page-heading">
+                <div>
+                    <p class="eyebrow">团队配置</p>
+                    <h1>角色与模型</h1>
+                    <p class="subtitle">监控团队配置、连接状态和执行记录。</p>
+                </div>
+                <span class="page-note">只读监控。</span>
+            </div>
+        </header>
+
+        <section class="team-section">
+            <h2 class="section-title">角色配置</h2>
+            <div id="rolesPanel" class="panel-content">
+                <div class="loading">加载角色配置中…</div>
+            </div>
+        </section>
+
+        <section class="team-section">
+            <h2 class="section-title">
+                连接检查
+                <button id="checkButton" class="check-button">运行检查</button>
+            </h2>
+            <p class="check-notice">此检查仅验证 TCP 连接，不代表鉴权或模型调用成功。</p>
+            <div id="checksPanel" class="panel-content">
+                <div class="info-message">点击"运行检查"按钮开始连接检查。</div>
+            </div>
+        </section>
+
+        <section class="team-section">
+            <h2 class="section-title">最近核对记录</h2>
+            <div id="auditPanel" class="panel-content">
+                <div class="loading">加载核对记录中…</div>
+            </div>
+        </section>
+
+        <section class="team-section">
+            <h2 class="section-title">下一批预览</h2>
+            <p class="batch-notice">此预览仅显示计划，不会实际执行任务。</p>
+            <div id="batchPanel" class="panel-content">
+                <div class="loading">加载批次预览中…</div>
+            </div>
+        </section>
+
+        <footer class="sheet-footer">
+            <span>团队监控 · 只读视图</span>
+            <span>角色和核对记录每5秒自动同步</span>
+        </footer>
+    </main>
+
+    <script src="/static/js/batch.js"></script>
+    <script src="/static/js/team.js"></script>
+</body>
+</html>

@@ -46,7 +46,7 @@ def test_verify_run_executes_commands(tmp_path):
 **状态**: OPEN
 
 ### 验收标准
-- [ ] `python -c "from pathlib import Path; Path('ok.txt').write_text('ok', encoding='utf-8')"` 生成文件
+- [ ] `python3 -c "from pathlib import Path; Path('ok.txt').write_text('ok', encoding='utf-8')"` 生成文件
 
 ---
 """,

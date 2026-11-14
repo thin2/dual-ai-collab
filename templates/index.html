@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task Management</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <main class="container">
+        {% include "project_bar.html" %}
+        <header>
+            <div class="masthead">
+                <a href="/" class="brand">Task Management</a>
+                <span class="edition">任务手记</span>
+            </div>
+            <div class="page-heading">
+                <div><p class="eyebrow">工作进度</p><h1>任务手记</h1>
+                <p class="subtitle">跟踪计划，监控每一步进展。</p></div>
+                <span class="page-note">从待办到完成。</span>
+            </div>
+            <div class="stats-bar" id="statsBar">
+                <div class="stat-item">
+                    <span class="stat-label">总任务数</span>
+                    <span class="stat-value" id="totalTasks">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">进行中</span>
+                    <span class="stat-value" id="inProgress">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">待审查</span>
+                    <span class="stat-value" id="awaitingReview">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">已完成</span>
+                    <span class="stat-value" id="completed">0</span>
+                </div>
+            </div>
+        </header>
+
+        <div class="filters" aria-label="筛选任务">
+            <button class="filter-btn active" data-filter="all" aria-pressed="true">全部</button>
+            <button class="filter-btn" data-filter="OPEN">待办</button>
+            <button class="filter-btn" data-filter="IN_PROGRESS">进行中</button>
+            <button class="filter-btn" data-filter="AWAITING_REVIEW">待审查</button>
+            <button class="filter-btn" data-filter="AWAITING_INTEGRATION">待确认集成</button>
+            <button class="filter-btn" data-filter="DONE">已完成</button>
+            <button class="filter-btn" data-filter="PENDING">待处理</button>
+            <button class="filter-btn" data-filter="BLOCKED">阻塞</button>
+            <button class="filter-btn" data-filter="FAILED">失败</button>
+        </div>
+
+        <div id="taskList" class="task-list">
+            <div class="loading">加载任务中…</div>
+        </div>
+        <footer class="sheet-footer"><span>项目任务 · 工作日志</span><span>每5秒自动同步</span></footer>
+    </main>
+
+    <script src="/static/js/tasks.js"></script>
+</body>
+</html>

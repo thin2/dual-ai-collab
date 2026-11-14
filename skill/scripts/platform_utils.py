@@ -11,7 +11,20 @@ import sys
 import time
 from pathlib import Path
 
+# Ensure UTF-8 output on Windows console (avoids cp936/GBK encoding issues)
+if sys.platform == 'win32' and hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except (AttributeError, OSError):
+        pass
+
 IS_WINDOWS = os.name == "nt"
+
+# Process status cache: {pid: (is_running, timestamp)}
+# Short TTL (200ms) to avoid expensive ps calls in tight loops
+_PROCESS_STATUS_CACHE: dict[int, tuple[bool, float]] = {}
+_PROCESS_CACHE_TTL = 0.2  # seconds
 
 
 def default_python() -> str:
@@ -66,20 +79,70 @@ class FileLock:
             age = time.time() - self.lock_path.stat().st_mtime
         except FileNotFoundError:
             return False
+        try:
+            owner = int(self.lock_path.read_text().strip())
+            if owner > 0:
+                return not is_process_running(owner)  # Never steal a live owner's lock.
+        except ProcessLookupError:
+            return True
+        except PermissionError:
+            return False
+        except (ValueError, OSError):
+            pass  # Newly created or unreadable locks retain the age grace period.
         return age >= self.stale_after
 
 
 def is_process_running(pid: int) -> bool:
+    """Check if a process is running (not a zombie).
+
+    Performance: uses fast os.kill(pid, 0) check first (~1-2µs).
+    Only calls ps (~5-10ms) when os.kill succeeds, to detect zombies.
+    Caches results for 200ms to avoid expensive calls in tight loops.
+    """
     if pid <= 0:
         return False
 
+    # Check cache first
+    now = time.time()
+    if pid in _PROCESS_STATUS_CACHE:
+        cached_status, cached_time = _PROCESS_STATUS_CACHE[pid]
+        if now - cached_time < _PROCESS_CACHE_TTL:
+            return cached_status
+
+    # Not in cache or expired - check actual status
+    is_running = _check_process_running_uncached(pid)
+    _PROCESS_STATUS_CACHE[pid] = (is_running, now)
+    return is_running
+
+
+def _check_process_running_uncached(pid: int) -> bool:
+    """Actual process check without caching."""
     if not IS_WINDOWS:
+        # Fast path: check if process exists at all
         try:
             os.kill(pid, 0)
-            return True
         except (OSError, ProcessLookupError):
             return False
 
+        # Slow path: process exists, but might be a zombie - verify with ps
+        try:
+            result = subprocess.run(
+                ["ps", "-p", str(pid), "-o", "stat="],
+                capture_output=True,
+                text=True,
+                timeout=1
+            )
+            if result.returncode == 0:
+                stat = result.stdout.strip()
+                # Z or Z+ means zombie
+                return not stat.startswith('Z')
+            # ps failed but os.kill succeeded - assume running
+            return True
+        except (subprocess.TimeoutExpired, OSError):
+            # ps command failed, fall back to os.kill result
+            return True
+
+    # Windows: use tasklist
     try:
         result = subprocess.run(
             ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],

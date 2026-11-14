@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dual-ai-collab"
+version = "3.5.0"
+description = "Task execution and verification tools for AI collaboration"
+requires-python = ">=3.9"
+dependencies = ["Flask>=2.3,<4", "packaging>=23"]
+
+[project.optional-dependencies]
+analytics = ["psutil>=5.9"]
+test = ["pytest>=7"]
+
+[tool.setuptools]
+packages = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

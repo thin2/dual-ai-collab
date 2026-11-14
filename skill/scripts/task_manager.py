@@ -16,6 +16,7 @@ from tasks_store import (
     CliError,
     DEFAULT_TASKS_MD,
     all_dependencies_satisfied,
+    executable_tasks,
     atomic_write,
     find_task,
     has_dependencies,
@@ -149,6 +150,8 @@ def cmd_update(task_num: str, new_status: str, task_file: str) -> int:
             print(f"SKIP: 任务 #{task_num} 已经是 {new_status}")
             return 0
 
+        target.pop("review", None)
+        target.pop("integration", None)
         target["status"] = new_status
         target["status_explicit"] = True
         if "status" not in target.get("field_order", []):
@@ -159,36 +162,22 @@ def cmd_update(task_num: str, new_status: str, task_file: str) -> int:
     return 0
 
 
-def cmd_select(parallel: bool, task_file: str) -> int:
+def cmd_select(parallel: bool, task_file: str, smart: bool = False) -> int:
     document = read_tasks_document(task_file)
-    tasks = document["tasks"]
-    for task in tasks:
-        require_explicit_status(task, task_file)
-
-    open_tasks = open_tasks_sorted(document)
-    if not open_tasks:
+    candidates = executable_tasks(document)
+    if not open_tasks_sorted(document):
         print("NO_OPEN_TASKS")
         return 0
-
-    if parallel:
-        lines = []
-        for task in open_tasks:
-            if not has_dependencies(task["dependencies"]):
-                priority = int(re.match(r"P(\d)", task.get("priority", "P9")).group(1)) if re.match(
-                    r"P(\d)", task.get("priority", "P9")
-                ) else 9
-                lines.append(f"{priority}|{task['id']}|{task['dependencies']}")
-        print("\n".join(lines) if lines else "NO_PARALLEL_TASKS")
+    if smart and candidates:
+        from task_scheduler import rank_available_tasks
+        candidates = rank_available_tasks(candidates, document)
+    if not candidates:
+        print("NO_PARALLEL_TASKS" if parallel else "NO_EXECUTABLE_TASKS")
         return 0
-
-    for task in open_tasks:
-        if all_dependencies_satisfied(tasks, task["dependencies"]):
-            priority_match = re.match(r"P(\d)", task.get("priority", "P9"))
-            priority = int(priority_match.group(1)) if priority_match else 9
-            print(f"{priority}|{task['id']}|{task['dependencies']}")
-            return 0
-
-    print("NO_EXECUTABLE_TASKS")
+    for task in candidates if parallel else candidates[:1]:
+        match = re.match(r"P(\d+)", task.get("priority", "P9"))
+        priority = int(match.group(1)) if match else 9
+        print(f"{priority}|{task['id']}|{task['dependencies']}")
     return 0
 
 
@@ -272,23 +261,30 @@ def cmd_summary(task_file: str, report: bool = False) -> int:
     document = read_tasks_document(task_file)
     valid_tasks = report_missing_status(document["tasks"])
 
-    counts = {"OPEN": 0, "IN_PROGRESS": 0, "DONE": 0, "VERIFIED": 0, "REJECTED": 0, "FAILED": 0}
+    counts = {"AWAITING_REVIEW": 0, "AWAITING_INTEGRATION": 0, "OPEN": 0, "IN_PROGRESS": 0, "DONE": 0, "VERIFIED": 0, "REJECTED": 0, "FAILED": 0}
     for task in valid_tasks:
         status = task.get("status")
         if status in counts:
             counts[status] += 1
 
     total = len(valid_tasks)
-    completed = counts["DONE"] + counts["VERIFIED"]
+    from task_board import integration_valid, receipt_valid
+    completed = sum(integration_valid(task) for task in valid_tasks)
     completion_rate = (completed / total * 100) if total else 0
-    audited = counts["VERIFIED"] + counts["REJECTED"]
-    audit_rate = (counts["VERIFIED"] / audited * 100) if audited else 0
+    approved = sum(task.get('review', {}).get('decision') == 'approved'
+                   and receipt_valid(task, task['review']) for task in valid_tasks)
+    # Keep historical audit counts visible while counting new review receipts.
+    audited = approved + counts["VERIFIED"] + counts["REJECTED"]
+    audit_rate = ((approved + counts["VERIFIED"]) / audited * 100) if audited else 0
 
     lines = [
         f"总任务: {total}",
         f"OPEN: {counts['OPEN']}",
         f"IN_PROGRESS: {counts['IN_PROGRESS']}",
         f"DONE: {counts['DONE']}",
+        f"AWAITING_REVIEW: {counts['AWAITING_REVIEW']}",
+        f"AWAITING_INTEGRATION: {counts['AWAITING_INTEGRATION']}",
+        f"INTEGRATED: {completed}",
         f"VERIFIED: {counts['VERIFIED']}",
         f"REJECTED: {counts['REJECTED']}",
         f"FAILED: {counts['FAILED']}",
@@ -324,6 +320,7 @@ def register_subparsers(subparsers, *, nested: bool = False):
 
     p_select = subparsers.add_parser("select", help="选择下一个可执行任务")
     p_select.add_argument("--parallel", action="store_true")
+    p_select.add_argument("--smart", action="store_true", help="按资源和历史记录排序（需要 psutil）")
     p_select.add_argument("task_file", nargs="?", default=DEFAULT_TASKS_MD)
 
     p_checkpoint_write = subparsers.add_parser("checkpoint-write", help="写入 checkpoint")
@@ -348,7 +345,7 @@ def dispatch(args) -> int:
     if args.command == "update":
         return cmd_update(args.task_num, args.new_status, args.task_file)
     if args.command == "select":
-        return cmd_select(args.parallel, args.task_file)
+        return cmd_select(args.parallel, args.task_file, args.smart)
     if args.command == "checkpoint-write":
         return cmd_checkpoint_write(args.phase, args.extra)
     if args.command == "checkpoint-check":

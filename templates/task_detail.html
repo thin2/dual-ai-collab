@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task Management</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/task_detail.css">
+</head>
+<body>
+    <main class="container detail-page">
+        {% include "project_bar.html" %}
+        <header>
+            <div class="masthead"><a href="/" class="brand">Task Management</a><span class="edition">任务详情</span></div>
+            <div class="header-nav">
+                <a href="{{ url_for('index', project_id=project.id) }}" class="back-link">← 返回任务列表</a>
+
+            </div>
+            <div class="page-heading"><div><p class="eyebrow">详细视图</p><h1>任务详情</h1></div></div>
+        </header>
+
+        <div class="detail-content">
+            <div id="messageContainer" role="status"></div>
+            <div id="taskDetail"><div class="loading">加载任务详情中…</div></div>
+        </div>
+        <footer class="sheet-footer"><span>项目任务 · 工作日志</span><span>每5秒自动同步</span></footer>
+    </main>
+
+    <script>
+        const taskId = {{ task_id | tojson }};
+    </script>
+    <script src="/static/js/markdown.js"></script>
+    <script src="/static/js/task_detail.js"></script>
+</body>
+</html>

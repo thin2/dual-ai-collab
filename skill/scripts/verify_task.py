@@ -90,5 +90,63 @@ def main() -> None:
         raise SystemExit(1)
 
 
+
+def verify_report(commands: list[str], workdir: str, timeout: float = 120) -> dict:
+    """Persistable acceptance evidence with bounded output and process cleanup."""
+    import math
+    import os
+    import shutil
+    import subprocess
+    import tempfile
+    import time
+    from platform_utils import terminate_process_tree
+
+    try:
+        timeout = float(timeout)
+    except (ValueError, TypeError) as exc:
+        raise CliError('verification_timeout 必须为正数') from exc
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise CliError('verification_timeout 必须为正数')
+    report = {'passed': False, 'commands': [], 'reason': None}
+    if not commands:
+        report['reason'] = '没有可执行的验收命令，不能标记 DONE'
+        return report
+    for command in commands:
+        started = time.monotonic()
+        timed_out = False
+        shell = shutil.which('bash') or shutil.which('sh')
+        argv = command if os.name == 'nt' else [shell or '/bin/sh', '-c', command]
+        kwargs = {'start_new_session': True} if os.name != 'nt' else {'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP}
+        with tempfile.TemporaryFile() as output:
+            try:
+                proc = subprocess.Popen(argv, cwd=workdir, shell=os.name == 'nt',
+                                        stdout=output, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, **kwargs)
+                try:
+                    code = proc.wait(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    timed_out = True
+                    terminate_process_tree(proc.pid, force=True)
+                    proc.wait(timeout=5)
+                    code = 124
+                except BaseException:
+                    terminate_process_tree(proc.pid, force=True)
+                    proc.wait(timeout=5)
+                    raise
+            except OSError as exc:
+                code = 127
+                output.write(str(exc).encode())
+            size = output.seek(0, os.SEEK_END)
+            output.seek(max(0, size - 16000))
+            text = output.read().decode('utf-8', errors='replace')
+        report['commands'].append({'command': command, 'exit_code': code, 'output': text,
+                                   'output_truncated': size > 16000, 'timed_out': timed_out,
+                                   'duration_seconds': time.monotonic() - started})
+        if code:
+            report['reason'] = '验收超时' if timed_out else '验收命令失败'
+            return report
+    report['passed'] = True
+    return report
+
+
 if __name__ == "__main__":
     main()
